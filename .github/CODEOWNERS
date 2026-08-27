@@ -1,0 +1,5 @@
+# TM ownership per docs/master-plan.md:398
+* @nv-hoai
+*.cs @nv-hoai @kenzoknz
+/job-platform-web/* @chibaongunguoi @nv-hoai
+/job-platform-mobile/* @Khoa35734 @nv-hoai
