@@ -17,3 +17,7 @@ cd job-platform-notif-svc
 
 ## Related Repos
 All 14 repos: `job-platform-shared, *-auth-svc, *-job-svc, *-search-svc, *-app-svc, *-profile-svc, *-notif-svc, *-gateway, *-web, *-mobile, *-crawler, *-ai-svc, *-infra, *-docs`.
+
+## Deploy (Render Free jp-notif — TM4 Khoa)
+- Service: `jp-notif` `https://jp-notif.onrender.com` `5006`
+- Hook: `RENDER_DEPLOY_HOOK_NOTIF`
