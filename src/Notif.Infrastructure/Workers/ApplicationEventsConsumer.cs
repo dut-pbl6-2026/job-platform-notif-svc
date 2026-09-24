@@ -16,7 +16,8 @@ namespace Notif.Infrastructure.Workers;
 /// <summary>
 /// Kafka application-events consumer (PBL6-35, SRS KAFKA-01-04).
 /// On application.submitted sends the recruiter template; on
-/// application.status_changed sends the applicant template.
+/// application.status_changed (alias application.updated per SRS 8.5.1)
+/// sends the applicant template.
 /// At-least-once: EmailLog.EventId is unique, redeliveries skip resend.
 /// NOTE: events carry ids only (no PII). Recipient resolves from
 /// NOTIF_DEFAULT_RECIPIENT until user/job lookup lands (PBL6 follow-up).
@@ -67,6 +68,7 @@ public class ApplicationEventsConsumer : KafkaConsumerService
                     return MessageOutcome.Skip;
 
                 case ApplicationEventTypes.StatusChanged:
+                case "application.updated":
                     if (TryParseEnvelope<ApplicationStatusChangedEvent>(value, out var changed) && changed is not null)
                     {
                         return await SendStatusChangedAsync(changed.Payload, changed.EventId, ct);
