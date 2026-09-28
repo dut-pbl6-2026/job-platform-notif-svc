@@ -12,7 +12,7 @@ using Npgsql.EntityFrameworkCore.PostgreSQL.Metadata;
 namespace Notif.Infrastructure.Migrations
 {
     [DbContext(typeof(NotifDbContext))]
-    [Migration("20260928052354_InitialCreate")]
+    [Migration("20260928054033_InitialCreate")]
     partial class InitialCreate
     {
         /// <inheritdoc />
@@ -63,6 +63,7 @@ namespace Notif.Infrastructure.Migrations
                         .HasColumnType("character varying(16)");
 
                     b.Property<string>("StatusSnapshot")
+                        .IsRequired()
                         .HasMaxLength(64)
                         .HasColumnType("character varying(64)");
 

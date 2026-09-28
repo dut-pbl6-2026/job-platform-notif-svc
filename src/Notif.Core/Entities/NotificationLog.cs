@@ -8,7 +8,7 @@ public sealed class NotificationLog : Entity
     public Guid EventId { get; private set; }
     public Guid ApplicationId { get; private set; }
     public string EventType { get; private set; } = string.Empty;
-    public string? StatusSnapshot { get; private set; }
+    public string StatusSnapshot { get; private set; } = string.Empty;
     public string RecipientEmail { get; private set; } = string.Empty;
     public string Subject { get; private set; } = string.Empty;
     public string TemplateName { get; private set; } = string.Empty;
@@ -35,7 +35,7 @@ public sealed class NotificationLog : Entity
         EventId = eventId == Guid.Empty ? Guid.NewGuid() : eventId;
         ApplicationId = applicationId;
         EventType = eventType.Trim();
-        StatusSnapshot = string.IsNullOrWhiteSpace(statusSnapshot) ? null : statusSnapshot.Trim();
+        StatusSnapshot = statusSnapshot?.Trim() ?? string.Empty;
         RecipientEmail = recipientEmail.Trim();
         Subject = subject.Trim();
         TemplateName = templateName.Trim();

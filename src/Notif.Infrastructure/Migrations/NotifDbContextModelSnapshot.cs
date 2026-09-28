@@ -60,6 +60,7 @@ namespace Notif.Infrastructure.Migrations
                         .HasColumnType("character varying(16)");
 
                     b.Property<string>("StatusSnapshot")
+                        .IsRequired()
                         .HasMaxLength(64)
                         .HasColumnType("character varying(64)");
 

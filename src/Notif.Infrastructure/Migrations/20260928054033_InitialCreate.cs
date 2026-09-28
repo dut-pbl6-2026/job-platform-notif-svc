@@ -19,7 +19,7 @@ namespace Notif.Infrastructure.Migrations
                     EventId = table.Column<Guid>(type: "uuid", nullable: false),
                     ApplicationId = table.Column<Guid>(type: "uuid", nullable: false),
                     EventType = table.Column<string>(type: "character varying(64)", maxLength: 64, nullable: false),
-                    StatusSnapshot = table.Column<string>(type: "character varying(64)", maxLength: 64, nullable: true),
+                    StatusSnapshot = table.Column<string>(type: "character varying(64)", maxLength: 64, nullable: false),
                     RecipientEmail = table.Column<string>(type: "character varying(256)", maxLength: 256, nullable: false),
                     Subject = table.Column<string>(type: "character varying(256)", maxLength: 256, nullable: false),
                     TemplateName = table.Column<string>(type: "character varying(64)", maxLength: 64, nullable: false),

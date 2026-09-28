@@ -111,23 +111,24 @@ public class ApplicationEventsConsumer : KafkaConsumerService
         using var scope = _services.CreateScope();
         var db = scope.ServiceProvider.GetRequiredService<NotifDbContext>();
         var sender = scope.ServiceProvider.GetRequiredService<INotificationService>();
+        var normalizedStatus = statusSnapshot?.Trim() ?? string.Empty;
         var existing = await db.NotificationLogs.FirstOrDefaultAsync(
             x => x.ApplicationId == applicationId
                 && x.EventType == eventType
-                && x.StatusSnapshot == statusSnapshot,
+            && x.StatusSnapshot == normalizedStatus,
             ct);
 
         if (existing is { Status: "sent" })
         {
             _logger.LogInformation(
                 "Notification already sent. ApplicationId={ApplicationId} EventType={EventType} Status={StatusSnapshot}.",
-                applicationId, eventType, statusSnapshot);
+                applicationId, eventType, normalizedStatus);
             return MessageOutcome.Handled;
         }
 
         var recipient = ResolveRecipient(recipientKind);
         var log = existing ?? new NotificationLog(
-            eventId, applicationId, eventType, statusSnapshot, recipient, subject, template);
+            eventId, applicationId, eventType, normalizedStatus, recipient, subject, template);
 
         if (existing is null)
         {
