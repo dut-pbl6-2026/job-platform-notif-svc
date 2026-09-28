@@ -93,14 +93,15 @@ public class ApplicationEventsConsumer : KafkaConsumerService
         using var scope = _services.CreateScope();
         var db = scope.ServiceProvider.GetRequiredService<NotifDbContext>();
         var sender = scope.ServiceProvider.GetRequiredService<IEmailSender>();
-        if (await db.EmailLogs.AnyAsync(e => e.EventId == eventId, ct))
+        var existing = await db.EmailLogs.FirstOrDefaultAsync(e => e.EventId == eventId, ct);
+        if (existing is { Status: "sent" })
         {
             return MessageOutcome.Handled;
         }
 
         var recipient = ResolveRecipient("recruiter");
         var (subject, html, text) = EmailTemplates.SubmittedToRecruiter(payload.JobTitle, payload.ApplicationId, payload.ApplicantId, payload.JobId);
-        return await SendAndLogAsync(db, sender, eventId, recipient, subject, html, text, EmailTemplates.ApplicationSubmitted, ct);
+        return await SendAndLogAsync(db, sender, existing, eventId, recipient, subject, html, text, EmailTemplates.ApplicationSubmitted, ct);
     }
 
     private async Task<MessageOutcome> SendStatusChangedAsync(ApplicationStatusChangedEvent payload, Guid eventId, CancellationToken ct)
@@ -108,20 +109,31 @@ public class ApplicationEventsConsumer : KafkaConsumerService
         using var scope = _services.CreateScope();
         var db = scope.ServiceProvider.GetRequiredService<NotifDbContext>();
         var sender = scope.ServiceProvider.GetRequiredService<IEmailSender>();
-        if (await db.EmailLogs.AnyAsync(e => e.EventId == eventId, ct))
+        var existing = await db.EmailLogs.FirstOrDefaultAsync(e => e.EventId == eventId, ct);
+        if (existing is { Status: "sent" })
         {
             return MessageOutcome.Handled;
         }
 
         var recipient = ResolveRecipient("applicant");
         var (subject, html, text) = EmailTemplates.StatusChangedToApplicant(payload.JobTitle, payload.NewStatus);
-        return await SendAndLogAsync(db, sender, eventId, recipient, subject, html, text, EmailTemplates.ApplicationStatusChanged, ct);
+        return await SendAndLogAsync(db, sender, existing, eventId, recipient, subject, html, text, EmailTemplates.ApplicationStatusChanged, ct);
     }
 
-    private async Task<MessageOutcome> SendAndLogAsync(NotifDbContext db, IEmailSender sender, Guid eventId, string recipient, string subject, string html, string text, string template, CancellationToken ct)
+    /// <summary>
+    /// Resends through an existing failed/pending log (Kafka redelivery) or creates
+    /// a fresh one. Only a log already in status "sent" short-circuits upstream, so a
+    /// transient SMTP failure is retried instead of being silently dropped, while the
+    /// unique EventId still guarantees at-most-once delivery for a successful send.
+    /// </summary>
+    private async Task<MessageOutcome> SendAndLogAsync(NotifDbContext db, IEmailSender sender, EmailLog? existing, Guid eventId, string recipient, string subject, string html, string text, string template, CancellationToken ct)
     {
-        var log = new EmailLog(eventId, recipient, subject, template);
-        db.EmailLogs.Add(log);
+        var log = existing ?? new EmailLog(eventId, recipient, subject, template);
+        if (existing is null)
+        {
+            db.EmailLogs.Add(log);
+        }
+
         try
         {
             await sender.SendAsync(recipient, subject, html, text, ct);
