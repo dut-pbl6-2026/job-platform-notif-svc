@@ -1,2 +1,31 @@
 [tools]
 dotnet = "10.0.100"
+"dotnet:dotnet-ef" = "10.0.4"
+
+[tasks.build]
+description = "Build solution"
+run = "dotnet build NotifService.sln --warnaserror"
+
+[tasks.test]
+description = "Run tests"
+run = "dotnet test NotifService.sln"
+
+[tasks.format]
+description = "Check formatting"
+run = "dotnet format --verify-no-changes NotifService.sln"
+
+[tasks.ef-check]
+description = "Check EF migrations"
+run = "dotnet ef migrations has-pending-model-changes --project src/Notif.Infrastructure --startup-project src/Notif.Api"
+
+[tasks.run]
+description = "Run API"
+run = "dotnet run --project src/Notif.Api"
+
+[tasks.pack-shared]
+description = "Pack SharedKernel and copy to local-feed"
+run = "dotnet pack ../job-platform-shared/src/SharedKernel/SharedKernel.csproj -c Release -o ../job-platform-shared/artifacts && cp ../job-platform-shared/artifacts/*.nupkg local-feed/"
+
+[tasks.sync-env]
+description = "Sync env from infra (ORG=dut-pbl6-2026)"
+run = "../job-platform-infra/scripts/sync-env.sh dev"

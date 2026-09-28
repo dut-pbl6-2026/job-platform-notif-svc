@@ -1,11 +1,11 @@
 bin/
 obj/
-*.user
-*.suo
 .vs/
-TestResults/
 *.nupkg
+!local-feed/*.nupkg
 .env
 .env.bak.*
 mise.toml.local
 INFISICAL_TOKEN
+*.user
+*.csproj.user
