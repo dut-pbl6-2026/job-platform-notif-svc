@@ -1,4 +1,5 @@
 using Microsoft.EntityFrameworkCore;
+using Notif.Api.Endpoints;
 using Notif.Core.Interfaces;
 using Notif.Infrastructure.Data;
 using Notif.Infrastructure.Services;
@@ -93,22 +94,25 @@ app.MapGet("/health", () => Results.Ok(new { status = "ok", service = "notificat
 app.MapGet("/", () => Results.Ok(new { service = "notification", version = "0.1.0" }))
     .ExcludeFromDescription();
 
-app.MapGet("/api/notifications/history", async (int page = 1, int size = 20, NotifDbContext db = null!, CancellationToken ct = default) =>
-{
-    page = Math.Max(1, page <= 0 ? 1 : page);
-    size = Math.Clamp(size <= 0 ? 20 : size, 1, 100);
-    var total = await db.NotificationLogs.CountAsync(ct);
-    var items = await db.NotificationLogs
-        .AsNoTracking()
-        .OrderByDescending(e => e.CreatedAt)
-        .Skip((page - 1) * size)
-        .Take(size)
-        .Select(e => new { e.Id, e.RecipientEmail, e.Subject, e.TemplateName, e.Status, e.SentAt, e.CreatedAt })
-        .ToListAsync(ct);
-    return Results.Ok(new { items, total, page, size });
-})
+app.MapGet("/api/notifications/history", async (
+    HttpContext ctx,
+    NotifDbContext db,
+    CancellationToken ct,
+    int page = 1,
+    int size = 20) =>
+    await NotificationHistoryEndpoint.HandleAsync(
+        ctx.Request.Headers[NotificationHistoryEndpoint.TokenHeader].FirstOrDefault(),
+        app.Configuration["NOTIF_HISTORY_TOKEN"],
+        page, size, db, ct))
 .WithTags("Notifications")
 .WithSummary("Paginated email delivery history (SRS NOTIF-01-06)");
+
+// NOTIF-01-06 rows carry recipient PII — loud signal when the internal token is off.
+if (string.IsNullOrWhiteSpace(app.Configuration["NOTIF_HISTORY_TOKEN"]))
+{
+    app.Logger.LogWarning(
+        "NOTIF_HISTORY_TOKEN is not set. Notification history accepts requests without an internal token — restrict network access in non-dev environments.");
+}
 
 using (var scope = app.Services.CreateScope())
 {
