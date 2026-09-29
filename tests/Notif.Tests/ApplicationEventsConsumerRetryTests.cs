@@ -144,4 +144,126 @@ public class ApplicationEventsConsumerRetryTests
         Assert.Equal(MessageOutcome.Handled, outcome);
         Assert.Equal(1, sender.Calls);
     }
+
+    [Fact]
+    public async Task PoisonJson_IsSkipped()
+    {
+        var dbName = Guid.NewGuid().ToString();
+        var (consumer, sender, _) = Build(dbName);
+
+        var outcome = await consumer.HandleAsync("{not-json");
+
+        Assert.Equal(MessageOutcome.Skip, outcome);
+        Assert.Equal(0, sender.Calls);
+    }
+
+    [Fact]
+    public async Task MissingEventType_IsSkipped()
+    {
+        var dbName = Guid.NewGuid().ToString();
+        var (consumer, sender, _) = Build(dbName);
+
+        var outcome = await consumer.HandleAsync("{\"foo\":1}");
+
+        Assert.Equal(MessageOutcome.Skip, outcome);
+        Assert.Equal(0, sender.Calls);
+    }
+
+    [Fact]
+    public async Task UnknownEventType_IsSkipped()
+    {
+        var dbName = Guid.NewGuid().ToString();
+        var (consumer, sender, _) = Build(dbName);
+        var json = "{\"eventId\":\"" + Guid.NewGuid() + "\",\"eventType\":\"job.created\",\"version\":1,\"payload\":{}}";
+
+        var outcome = await consumer.HandleAsync(json);
+
+        Assert.Equal(MessageOutcome.Skip, outcome);
+        Assert.Equal(0, sender.Calls);
+    }
+
+    [Fact]
+    public async Task SubmittedWithEmptyApplicationId_IsSkipped()
+    {
+        var dbName = Guid.NewGuid().ToString();
+        var (consumer, sender, _) = Build(dbName);
+        var payload = new ApplicationSubmittedEvent(
+            Guid.Empty, Guid.NewGuid(), "Backend Dev", Guid.NewGuid(), DateTime.UtcNow);
+        var json = JsonSerializer.Serialize(
+            EventEnvelope<ApplicationSubmittedEvent>.Create(ApplicationEventTypes.Submitted, payload),
+            KafkaJson.Options);
+
+        var outcome = await consumer.HandleAsync(json);
+
+        Assert.Equal(MessageOutcome.Skip, outcome);
+        Assert.Equal(0, sender.Calls);
+    }
+
+    [Fact]
+    public async Task StatusChangedWithEmptyApplicationId_IsSkipped()
+    {
+        var dbName = Guid.NewGuid().ToString();
+        var (consumer, sender, _) = Build(dbName);
+        var payload = new ApplicationStatusChangedEvent(
+            Guid.Empty, Guid.NewGuid(), "Backend Dev", Guid.NewGuid(),
+            "pending", "accepted", Guid.NewGuid(), DateTime.UtcNow);
+        var json = JsonSerializer.Serialize(
+            EventEnvelope<ApplicationStatusChangedEvent>.Create(ApplicationEventTypes.StatusChanged, payload),
+            KafkaJson.Options);
+
+        var outcome = await consumer.HandleAsync(json);
+
+        Assert.Equal(MessageOutcome.Skip, outcome);
+        Assert.Equal(0, sender.Calls);
+    }
+
+    [Fact]
+    public async Task UpdatedAlias_IsHandled()
+    {
+        var dbName = Guid.NewGuid().ToString();
+        var (consumer, sender, _) = Build(dbName);
+        var payload = new ApplicationStatusChangedEvent(
+            Guid.NewGuid(), Guid.NewGuid(), "Backend Dev", Guid.NewGuid(),
+            "pending", "accepted", Guid.NewGuid(), DateTime.UtcNow);
+        var json = JsonSerializer.Serialize(
+            EventEnvelope<ApplicationStatusChangedEvent>.Create("application.updated", payload),
+            KafkaJson.Options);
+
+        var outcome = await consumer.HandleAsync(json);
+
+        Assert.Equal(MessageOutcome.Handled, outcome);
+        Assert.Equal(1, sender.Calls);
+    }
+
+    [Fact]
+    public async Task StatusCasing_IsNormalizedToOneRow()
+    {
+        var dbName = Guid.NewGuid().ToString();
+        var (consumer, sender, provider) = Build(dbName);
+        var applicationId = Guid.NewGuid();
+
+        var first = await consumer.HandleAsync(StatusChangedEnvelope(applicationId, "Accepted"));
+        var second = await consumer.HandleAsync(StatusChangedEnvelope(applicationId, "accepted"));
+
+        Assert.Equal(MessageOutcome.Handled, first);
+        Assert.Equal(MessageOutcome.Handled, second);
+        Assert.Equal(1, sender.Calls);
+
+        using var scope = provider.CreateScope();
+        var db = scope.ServiceProvider.GetRequiredService<NotifDbContext>();
+        var logs = await db.NotificationLogs.ToListAsync();
+        var log = Assert.Single(logs);
+        Assert.Equal("sent", log.Status);
+        Assert.Equal("accepted", log.StatusSnapshot);
+    }
+
+    private static string StatusChangedEnvelope(Guid applicationId, string newStatus)
+    {
+        var payload = new ApplicationStatusChangedEvent(
+            applicationId, Guid.NewGuid(), "Backend Dev", Guid.NewGuid(),
+            "pending", newStatus, Guid.NewGuid(), DateTime.UtcNow);
+        return JsonSerializer.Serialize(
+            EventEnvelope<ApplicationStatusChangedEvent>.Create(ApplicationEventTypes.StatusChanged, payload),
+            KafkaJson.Options);
+    }
 }
