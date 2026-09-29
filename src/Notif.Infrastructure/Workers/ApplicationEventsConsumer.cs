@@ -8,6 +8,7 @@ using Notif.Core.Entities;
 using Notif.Core.Interfaces;
 using Notif.Core.Templates;
 using Notif.Infrastructure.Data;
+using Npgsql;
 using SharedKernel.Events;
 using SharedKernel.Kafka;
 
@@ -56,7 +57,10 @@ public class ApplicationEventsConsumer : KafkaConsumerService
 
                 return await SendSubmittedAsync(submitted, ct);
 
+            // SRS 8.5 names this event application.updated; the shared contract and the
+            // app-svc producer use application.status_changed (plan v3.1). Accept both.
             case ApplicationEventTypes.StatusChanged:
+            case "application.updated":
                 if (!TryParseEnvelope<ApplicationStatusChangedEvent>(value, out var changed) || changed is null)
                 {
                     _logger.LogWarning("Kafka poison message on {Topic}: cannot parse {EventType}. Skipping.", Topic, eventType);
@@ -76,6 +80,12 @@ public class ApplicationEventsConsumer : KafkaConsumerService
         CancellationToken ct)
     {
         var payload = envelope.Payload;
+        if (payload.ApplicationId == Guid.Empty)
+        {
+            _logger.LogWarning("Kafka poison message on {Topic}: application.submitted with empty ApplicationId. Skipping.", Topic);
+            return MessageOutcome.Skip;
+        }
+
         var (subject, html, text) = EmailTemplates.SubmittedToRecruiter(
             payload.JobTitle, payload.ApplicationId, payload.ApplicantId, payload.JobId);
 
@@ -89,6 +99,12 @@ public class ApplicationEventsConsumer : KafkaConsumerService
         CancellationToken ct)
     {
         var payload = envelope.Payload;
+        if (payload.ApplicationId == Guid.Empty)
+        {
+            _logger.LogWarning("Kafka poison message on {Topic}: application.status_changed with empty ApplicationId. Skipping.", Topic);
+            return MessageOutcome.Skip;
+        }
+
         var (subject, html, text) = EmailTemplates.StatusChangedToApplicant(payload.JobTitle, payload.NewStatus);
 
         return await SendAndLogAsync(
@@ -111,7 +127,8 @@ public class ApplicationEventsConsumer : KafkaConsumerService
         using var scope = _services.CreateScope();
         var db = scope.ServiceProvider.GetRequiredService<NotifDbContext>();
         var sender = scope.ServiceProvider.GetRequiredService<INotificationService>();
-        var normalizedStatus = statusSnapshot?.Trim() ?? string.Empty;
+        // Lower-cased so "Accepted" and "accepted" share one idempotency row.
+        var normalizedStatus = (statusSnapshot?.Trim() ?? string.Empty).ToLowerInvariant();
         var existing = await db.NotificationLogs.FirstOrDefaultAsync(
             x => x.ApplicationId == applicationId
                 && x.EventType == eventType
@@ -139,7 +156,21 @@ public class ApplicationEventsConsumer : KafkaConsumerService
         {
             await sender.SendAsync(recipient, subject, html, text, ct);
             log.MarkSent();
-            await db.SaveChangesAsync(ct);
+            try
+            {
+                await db.SaveChangesAsync(ct);
+            }
+            catch (DbUpdateException dbEx) when (IsUniqueConflict(dbEx))
+            {
+                // A concurrent delivery already logged this notification; the email
+                // went out above, so commit past it instead of looping forever.
+                _logger.LogInformation(
+                    dbEx,
+                    "Notification already logged by a concurrent delivery. ApplicationId={ApplicationId} EventType={EventType}.",
+                    applicationId, eventType);
+                return MessageOutcome.Handled;
+            }
+
             _logger.LogInformation(
                 "Email sent. ApplicationId={ApplicationId} EventType={EventType} RecipientKind={RecipientKind}.",
                 applicationId, eventType, recipientKind);
@@ -159,6 +190,24 @@ public class ApplicationEventsConsumer : KafkaConsumerService
                 applicationId, eventType);
             return MessageOutcome.Retry;
         }
+    }
+
+    private static bool IsUniqueConflict(DbUpdateException ex)
+    {
+        Exception? current = ex;
+        while (current is not null)
+        {
+            // Postgres unique_violation (23505), e.g. on
+            // IX_notification_logs_ApplicationId_EventType_StatusSnapshot.
+            if (current is PostgresException pg && pg.SqlState == "23505")
+            {
+                return true;
+            }
+
+            current = current.InnerException;
+        }
+
+        return false;
     }
 
     private string ResolveRecipient(string kind)
