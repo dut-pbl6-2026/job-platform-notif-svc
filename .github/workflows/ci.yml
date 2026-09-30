@@ -9,5 +9,5 @@ jobs:
         with: { dotnet-version: '10.0.100' }
       - run: dotnet restore NotifService.sln
       - run: dotnet build NotifService.sln --configuration Release --warnaserror --no-restore
-      - run: dotnet test NotifService.sln --no-build
+      - run: dotnet test NotifService.sln --no-build --configuration Release
       - run: dotnet format NotifService.sln --verify-no-changes --no-restore
