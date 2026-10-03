@@ -12,11 +12,16 @@ public static class EmailTemplates
     public const string ApplicationSubmitted = "application-submitted";
     public const string ApplicationStatusChanged = "application-status-changed";
 
-    public static (string Subject, string Html, string Text) SubmittedToRecruiter(string jobTitle, Guid applicationId, Guid applicantId, Guid jobId)
+    public static (string Subject, string Html, string Text) SubmittedToRecruiter(
+        string jobTitle, Guid applicationId, Guid applicantId, Guid jobId, string baseUrl = "")
     {
         var safeTitle = string.IsNullOrWhiteSpace(jobTitle) ? "a job" : jobTitle.Trim();
         var subject = $"New application for {safeTitle}";
-        var link = $"/api/applications/{applicationId}";
+        // baseUrl should be set to NOTIF_BASE_URL (e.g. "https://api.job-platform.com") so
+        // that the link is absolute and works in email clients. Defaults to "" (relative) in
+        // local/dev where baseUrl is not configured.
+        var base_ = baseUrl.TrimEnd('/');
+        var link = $"{base_}/api/applications/{applicationId}";
         var html = $"<p>You have a new application for <strong>{WebUtility.HtmlEncode(safeTitle)}</strong>.</p>"
             + $"<p>Applicant: <code>{applicantId}</code><br/>Job: <code>{jobId}</code></p>"
             + $"<p><a href=\"{WebUtility.HtmlEncode(link)}\">View application</a></p>";

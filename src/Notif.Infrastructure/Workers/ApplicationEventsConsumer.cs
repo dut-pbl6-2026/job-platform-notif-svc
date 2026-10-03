@@ -86,8 +86,9 @@ public class ApplicationEventsConsumer : KafkaConsumerService
             return MessageOutcome.Skip;
         }
 
+        var baseUrl = _configuration["NOTIF_BASE_URL"] ?? "";
         var (subject, html, text) = EmailTemplates.SubmittedToRecruiter(
-            payload.JobTitle, payload.ApplicationId, payload.ApplicantId, payload.JobId);
+            payload.JobTitle, payload.ApplicationId, payload.ApplicantId, payload.JobId, baseUrl);
 
         return await SendAndLogAsync(
             envelope.EventId, payload.ApplicationId, ApplicationEventTypes.Submitted, null,
@@ -212,11 +213,15 @@ public class ApplicationEventsConsumer : KafkaConsumerService
 
     private string ResolveRecipient(string kind)
     {
+        // [STUB] Real recipient lookup from auth/profile service is not yet implemented
+        // (PBL6-35 follow-up). All emails are delivered to the configured fallback address.
+        // Remove this stub once RecipientResolver integrates with the profile/auth API.
         var fallback = _configuration["NOTIF_DEFAULT_RECIPIENT"]
             ?? _configuration["SMTP_FROM"]
-            ?? "recruiter@job-platform.local";
-        _logger.LogDebug(
-            "Recipient lookup for {RecipientKind} is using configured fallback. Recipient={Recipient}.",
+            ?? "noreply@job-platform.local";
+        _logger.LogWarning(
+            "[STUB] Recipient for {RecipientKind} resolved to configured fallback {Recipient}. "
+            + "Real user lookup (PBL6-35) is not yet implemented — do not use in production without setting NOTIF_DEFAULT_RECIPIENT.",
             kind, fallback);
         return fallback;
     }
