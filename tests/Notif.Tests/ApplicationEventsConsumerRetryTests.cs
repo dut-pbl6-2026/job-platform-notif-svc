@@ -2,7 +2,6 @@ using System.Text.Json;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
-using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Logging.Abstractions;
 using Microsoft.Extensions.Options;
 using Microsoft.Extensions.Primitives;
@@ -16,9 +15,10 @@ using Xunit;
 namespace Notif.Tests;
 
 /// <summary>
-/// Regression tests for the Kafka redelivery contract (review of PR #3):
+/// Regression tests for the Kafka redelivery contract:
 /// a failed send must be retried on redelivery, not silently dropped by the
 /// EventId idempotency check, and the log row must be reused (no unique violation).
+/// Addresses Critical Issue #1 from PR review: idempotency vs retry logic conflict.
 /// </summary>
 public class ApplicationEventsConsumerRetryTests
 {
@@ -90,6 +90,12 @@ public class ApplicationEventsConsumerRetryTests
         return JsonSerializer.Serialize(envelope, KafkaJson.Options);
     }
 
+    // ── Critical Issue #1: idempotency vs retry ─────────────────────────────
+
+    /// <summary>
+    /// First delivery fails → Retry. Second delivery (Kafka redelivery) reuses
+    /// the existing failed log row and succeeds → Handled. Only ONE log row exists.
+    /// </summary>
     [Fact]
     public async Task FailedSend_IsRetriedOnRedelivery_WithSingleLogRow()
     {
@@ -112,6 +118,9 @@ public class ApplicationEventsConsumerRetryTests
         Assert.Equal("sent", log.Status);
     }
 
+    /// <summary>
+    /// Already-sent log short-circuits without resending — idempotent delivery.
+    /// </summary>
     [Fact]
     public async Task SentLog_ShortCircuits_WithoutResending()
     {
@@ -126,6 +135,8 @@ public class ApplicationEventsConsumerRetryTests
         Assert.Equal(MessageOutcome.Handled, second);
         Assert.Equal(1, sender.Calls);
     }
+
+    // ── SRS alias / event routing ────────────────────────────────────────────
 
     [Fact]
     public async Task StatusChangedAlias_IsHandled()
@@ -143,5 +154,79 @@ public class ApplicationEventsConsumerRetryTests
 
         Assert.Equal(MessageOutcome.Handled, outcome);
         Assert.Equal(1, sender.Calls);
+    }
+
+    // ── Poison / unknown message handling ────────────────────────────────────
+
+    [Fact]
+    public async Task PoisonJson_IsSkipped()
+    {
+        var dbName = Guid.NewGuid().ToString();
+        var (consumer, sender, _) = Build(dbName);
+
+        var outcome = await consumer.HandleAsync("{not-json");
+
+        Assert.Equal(MessageOutcome.Skip, outcome);
+        Assert.Equal(0, sender.Calls);
+    }
+
+    [Fact]
+    public async Task MissingEventType_IsSkipped()
+    {
+        var dbName = Guid.NewGuid().ToString();
+        var (consumer, sender, _) = Build(dbName);
+
+        var outcome = await consumer.HandleAsync("{\"foo\":1}");
+
+        Assert.Equal(MessageOutcome.Skip, outcome);
+        Assert.Equal(0, sender.Calls);
+    }
+
+    [Fact]
+    public async Task UnknownEventType_IsSkipped()
+    {
+        var dbName = Guid.NewGuid().ToString();
+        var (consumer, sender, _) = Build(dbName);
+        var json = "{\"eventId\":\"" + Guid.NewGuid() + "\",\"eventType\":\"job.created\",\"version\":1,\"payload\":{}}";
+
+        var outcome = await consumer.HandleAsync(json);
+
+        Assert.Equal(MessageOutcome.Skip, outcome);
+        Assert.Equal(0, sender.Calls);
+    }
+
+    [Fact]
+    public async Task SubmittedWithEmptyApplicationId_IsSkipped()
+    {
+        var dbName = Guid.NewGuid().ToString();
+        var (consumer, sender, _) = Build(dbName);
+        var payload = new ApplicationSubmittedEvent(
+            Guid.Empty, Guid.NewGuid(), "Backend Dev", Guid.NewGuid(), DateTime.UtcNow);
+        var json = JsonSerializer.Serialize(
+            EventEnvelope<ApplicationSubmittedEvent>.Create(ApplicationEventTypes.Submitted, payload),
+            KafkaJson.Options);
+
+        var outcome = await consumer.HandleAsync(json);
+
+        Assert.Equal(MessageOutcome.Skip, outcome);
+        Assert.Equal(0, sender.Calls);
+    }
+
+    [Fact]
+    public async Task StatusChangedWithEmptyApplicationId_IsSkipped()
+    {
+        var dbName = Guid.NewGuid().ToString();
+        var (consumer, sender, _) = Build(dbName);
+        var payload = new ApplicationStatusChangedEvent(
+            Guid.Empty, Guid.NewGuid(), "Backend Dev", Guid.NewGuid(),
+            "pending", "accepted", Guid.NewGuid(), DateTime.UtcNow);
+        var json = JsonSerializer.Serialize(
+            EventEnvelope<ApplicationStatusChangedEvent>.Create(ApplicationEventTypes.StatusChanged, payload),
+            KafkaJson.Options);
+
+        var outcome = await consumer.HandleAsync(json);
+
+        Assert.Equal(MessageOutcome.Skip, outcome);
+        Assert.Equal(0, sender.Calls);
     }
 }

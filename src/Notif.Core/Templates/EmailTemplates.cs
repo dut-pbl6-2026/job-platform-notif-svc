@@ -12,11 +12,13 @@ public static class EmailTemplates
     public const string ApplicationSubmitted = "application-submitted";
     public const string ApplicationStatusChanged = "application-status-changed";
 
-    public static (string Subject, string Html, string Text) SubmittedToRecruiter(string jobTitle, Guid applicationId, Guid applicantId, Guid jobId)
+    public static (string Subject, string Html, string Text) SubmittedToRecruiter(
+        string jobTitle, Guid applicationId, Guid applicantId, Guid jobId, string baseUrl = "")
     {
         var safeTitle = string.IsNullOrWhiteSpace(jobTitle) ? "a job" : jobTitle.Trim();
         var subject = $"New application for {safeTitle}";
-        var link = $"/api/applications/{applicationId}";
+        var safeBase = baseUrl.TrimEnd('/');
+        var link = $"{safeBase}/api/applications/{applicationId}";
         var html = $"<p>You have a new application for <strong>{WebUtility.HtmlEncode(safeTitle)}</strong>.</p>"
             + $"<p>Applicant: <code>{applicantId}</code><br/>Job: <code>{jobId}</code></p>"
             + $"<p><a href=\"{WebUtility.HtmlEncode(link)}\">View application</a></p>";

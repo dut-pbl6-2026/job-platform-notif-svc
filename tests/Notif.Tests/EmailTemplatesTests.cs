@@ -18,6 +18,27 @@ public class EmailTemplatesTests
     }
 
     [Fact]
+    public void SubmittedToRecruiter_WithBaseUrl_ProducesAbsoluteLink()
+    {
+        var appId = Guid.NewGuid();
+        var (_, html, text) = EmailTemplates.SubmittedToRecruiter(
+            "Backend Dev", appId, Guid.NewGuid(), Guid.NewGuid(), "https://app.example.com");
+        Assert.Contains($"https://app.example.com/api/applications/{appId}", html);
+        Assert.Contains($"https://app.example.com/api/applications/{appId}", text);
+    }
+
+    [Fact]
+    public void SubmittedToRecruiter_EmptyBaseUrl_ProducesRelativeLink()
+    {
+        var appId = Guid.NewGuid();
+        var (_, html, text) = EmailTemplates.SubmittedToRecruiter(
+            "Backend Dev", appId, Guid.NewGuid(), Guid.NewGuid(), "");
+        // Relative link starts directly with /api
+        Assert.Contains($"/api/applications/{appId}", html);
+        Assert.DoesNotContain("https://", html);
+    }
+
+    [Fact]
     public void StatusChangedToApplicant_NormalizesStatus()
     {
         var (subject, html, _) = EmailTemplates.StatusChangedToApplicant("Backend Dev", "Accepted");

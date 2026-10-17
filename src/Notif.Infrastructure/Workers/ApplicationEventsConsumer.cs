@@ -18,9 +18,11 @@ namespace Notif.Infrastructure.Workers;
 /// On application.submitted sends the recruiter template; on
 /// application.status_changed (alias application.updated per SRS 8.5.1)
 /// sends the applicant template.
-/// At-least-once: EmailLog.EventId is unique, redeliveries skip resend.
-/// NOTE: events carry ids only (no PII). Recipient resolves from
-/// NOTIF_DEFAULT_RECIPIENT until user/job lookup lands (PBL6 follow-up).
+/// At-least-once delivery with idempotent retry: on first delivery a new
+/// EmailLog row is created; if the send fails, Kafka redelivers the same
+/// EventId and the existing failed/pending log is reused so no unique
+/// constraint is violated. Only a log already in status "sent" short-circuits.
+/// Recipient is resolved from NOTIF_DEFAULT_RECIPIENT (stub — see below).
 /// </summary>
 public class ApplicationEventsConsumer : KafkaConsumerService
 {
@@ -90,6 +92,13 @@ public class ApplicationEventsConsumer : KafkaConsumerService
 
     private async Task<MessageOutcome> SendSubmittedAsync(ApplicationSubmittedEvent payload, Guid eventId, CancellationToken ct)
     {
+        if (payload.ApplicationId == Guid.Empty)
+        {
+            _typedLogger.LogWarning(
+                "Kafka poison message on {Topic}: application.submitted with empty ApplicationId. Skipping.", Topic);
+            return MessageOutcome.Skip;
+        }
+
         using var scope = _services.CreateScope();
         var db = scope.ServiceProvider.GetRequiredService<NotifDbContext>();
         var sender = scope.ServiceProvider.GetRequiredService<IEmailSender>();
@@ -100,12 +109,20 @@ public class ApplicationEventsConsumer : KafkaConsumerService
         }
 
         var recipient = ResolveRecipient("recruiter");
-        var (subject, html, text) = EmailTemplates.SubmittedToRecruiter(payload.JobTitle, payload.ApplicationId, payload.ApplicantId, payload.JobId);
+        var baseUrl = _config["NOTIF_BASE_URL"] ?? "";
+        var (subject, html, text) = EmailTemplates.SubmittedToRecruiter(payload.JobTitle, payload.ApplicationId, payload.ApplicantId, payload.JobId, baseUrl);
         return await SendAndLogAsync(db, sender, existing, eventId, recipient, subject, html, text, EmailTemplates.ApplicationSubmitted, ct);
     }
 
     private async Task<MessageOutcome> SendStatusChangedAsync(ApplicationStatusChangedEvent payload, Guid eventId, CancellationToken ct)
     {
+        if (payload.ApplicationId == Guid.Empty)
+        {
+            _typedLogger.LogWarning(
+                "Kafka poison message on {Topic}: application.status_changed with empty ApplicationId. Skipping.", Topic);
+            return MessageOutcome.Skip;
+        }
+
         using var scope = _services.CreateScope();
         var db = scope.ServiceProvider.GetRequiredService<NotifDbContext>();
         var sender = scope.ServiceProvider.GetRequiredService<IEmailSender>();
@@ -143,7 +160,10 @@ public class ApplicationEventsConsumer : KafkaConsumerService
         }
         catch (DbUpdateException ex)
         {
-            _typedLogger.LogWarning(ex, "Email log conflict EventId={EventId}. Skipping resend.", eventId);
+            // Concurrent delivery: another consumer instance already committed a
+            // "sent" row for this EventId between our FirstOrDefaultAsync and
+            // SaveChangesAsync. The email was sent above, so treat as handled.
+            _typedLogger.LogWarning(ex, "Email log conflict EventId={EventId}: concurrent delivery already saved. Treating as handled.", eventId);
             return MessageOutcome.Handled;
         }
         catch (Exception ex)
@@ -157,10 +177,16 @@ public class ApplicationEventsConsumer : KafkaConsumerService
 
     private string ResolveRecipient(string kind)
     {
+        // [STUB] Real recipient lookup from auth/profile service is not yet implemented
+        // (PBL6-35 follow-up). All emails are delivered to the configured fallback address.
+        // Remove this stub once RecipientResolver integrates with the profile/auth API.
         var fallback = _config["NOTIF_DEFAULT_RECIPIENT"]
             ?? _config["SMTP_FROM"]
-            ?? "recruiter@job-platform.local";
-        _typedLogger.LogDebug("Resolving {Kind} recipient via fallback {Recipient} (user lookup TODO).", kind, fallback);
+            ?? "noreply@job-platform.local";
+        _typedLogger.LogWarning(
+            "[STUB] Recipient for {RecipientKind} resolved to configured fallback {Recipient}. "
+            + "Real user lookup (PBL6-35) is not yet implemented — do not use in production without setting NOTIF_DEFAULT_RECIPIENT.",
+            kind, fallback);
         return fallback;
     }
 
