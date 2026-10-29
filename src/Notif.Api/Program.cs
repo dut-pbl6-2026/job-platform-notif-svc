@@ -69,6 +69,8 @@ builder.Services.Configure<KafkaOptions>(o =>
         ?? builder.Configuration["Kafka:SslCaLocation"] ?? "";
 });
 builder.Services.AddHostedService<ApplicationEventsConsumer>();
+// feat(admin) Slice 5: job approval/rejection emails to recruiters.
+builder.Services.AddHostedService<JobEventsConsumer>();
 
 builder.Services.AddProblemDetails();
 builder.Services.AddEndpointsApiExplorer();
