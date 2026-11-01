@@ -11,3 +11,48 @@ jobs:
       - run: dotnet build NotifService.sln --configuration Release --warnaserror --no-restore
       - run: dotnet test NotifService.sln --no-build --configuration Release
       - run: dotnet format NotifService.sln --verify-no-changes --no-restore
+
+  # PBL6-50: optional SonarCloud analysis. Runs its steps only when the SONAR_TOKEN
+  # secret exists (empty on fork PRs / Dependabot / unset secret) so it never blocks CI.
+  sonarcloud:
+    runs-on: ubuntu-latest
+    env:
+      SONAR_TOKEN: ${{ secrets.SONAR_TOKEN }}
+      GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+    steps:
+      - name: SonarCloud skipped (SONAR_TOKEN not available)
+        if: env.SONAR_TOKEN == ''
+        run: echo "SONAR_TOKEN not set - skipping SonarCloud analysis"
+      - uses: actions/checkout@v4
+        if: env.SONAR_TOKEN != ''
+        with:
+          fetch-depth: 0
+      - uses: actions/setup-dotnet@v4
+        if: env.SONAR_TOKEN != ''
+        with:
+          dotnet-version: 10.0.x
+      - uses: actions/setup-java@v4
+        if: env.SONAR_TOKEN != ''
+        with: { distribution: temurin, java-version: "17" }
+      - name: Install SonarScanner
+        if: env.SONAR_TOKEN != ''
+        run: dotnet tool install --global dotnet-sonarscanner --version 11.2.1
+      - name: SonarCloud begin
+        if: env.SONAR_TOKEN != ''
+        run: >
+          dotnet-sonarscanner begin
+          /k:"${{ vars.SONAR_PROJECT_KEY || 'dut-pbl6-2026_job-platform-notif-svc' }}"
+          /o:"${{ vars.SONAR_ORGANIZATION || 'dut-pbl6-2026' }}"
+          /d:sonar.token="$SONAR_TOKEN"
+          /d:sonar.host.url="https://sonarcloud.io"
+          /d:sonar.cs.opencover.reportsPaths="**/TestResults/**/coverage.opencover.xml"
+          /d:sonar.exclusions="**/Migrations/**"
+      - name: Build
+        if: env.SONAR_TOKEN != ''
+        run: dotnet build NotifService.sln --no-incremental
+      - name: Test with coverage
+        if: env.SONAR_TOKEN != ''
+        run: dotnet test NotifService.sln --no-build --collect:"XPlat Code Coverage" -- DataCollectionRunSettings.DataCollectors.DataCollector.Configuration.Format=opencover
+      - name: SonarCloud end
+        if: env.SONAR_TOKEN != ''
+        run: dotnet-sonarscanner end /d:sonar.token="$SONAR_TOKEN"
