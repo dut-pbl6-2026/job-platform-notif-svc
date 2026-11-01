@@ -5,6 +5,7 @@ using Notif.Infrastructure.Data;
 using Notif.Infrastructure.Services;
 using Notif.Infrastructure.Workers;
 using SharedKernel.Kafka;
+using OpenTelemetry.Metrics;
 
 var builder = WebApplication.CreateBuilder(args);
 
@@ -14,6 +15,16 @@ builder.Logging.AddJsonConsole(o =>
     o.IncludeScopes = true;
     o.TimestampFormat = "yyyy-MM-ddTHH:mm:ssZ";
 });
+
+builder.Services.AddOpenTelemetry()
+    .WithMetrics(metrics =>
+    {
+        metrics
+            .AddAspNetCoreInstrumentation()
+            .AddHttpClientInstrumentation()
+            .AddRuntimeInstrumentation()
+            .AddPrometheusExporter();
+    });
 
 static bool IsUnusable(string? v) =>
     string.IsNullOrWhiteSpace(v)
@@ -87,6 +98,7 @@ if (app.Environment.IsDevelopment())
     app.UseSwaggerUI();
 }
 
+app.MapPrometheusScrapingEndpoint();
 app.MapGet("/health", () => Results.Ok(new { status = "ok", service = "notification" }))
     .WithTags("Health")
     .ExcludeFromDescription();
