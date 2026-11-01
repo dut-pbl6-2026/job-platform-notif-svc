@@ -69,8 +69,25 @@ builder.Services.Configure<KafkaOptions>(o =>
         ?? builder.Configuration["Kafka:SslCaLocation"] ?? "";
 });
 builder.Services.AddHostedService<ApplicationEventsConsumer>();
+
 // feat(admin) Slice 5: job approval/rejection emails to recruiters.
-builder.Services.AddHostedService<JobEventsConsumer>();
+// Gated (NOTIF_JOB_EVENTS_ENABLED, off by default): JobUpdatedEvent carries neither the
+// recruiter's address nor a previous-status transition, so running it by default would
+// mail the shared fallback inbox and label ordinary edits of live jobs as approvals.
+var jobEventsEnabled = JobEventsConsumer.IsEnabled(builder.Configuration);
+if (jobEventsEnabled)
+{
+    var jobEventsRecipient = builder.Configuration["NOTIF_DEFAULT_RECIPIENT"]
+        ?? builder.Configuration["SMTP_FROM"];
+    if (IsUnusable(jobEventsRecipient))
+    {
+        throw new InvalidOperationException(
+            "NOTIF_JOB_EVENTS_ENABLED=true requires NOTIF_DEFAULT_RECIPIENT or SMTP_FROM. "
+            + "Refusing to start a consumer that cannot deliver notifications.");
+    }
+
+    builder.Services.AddHostedService<JobEventsConsumer>();
+}
 
 builder.Services.AddProblemDetails();
 builder.Services.AddEndpointsApiExplorer();
@@ -114,6 +131,13 @@ if (string.IsNullOrWhiteSpace(app.Configuration["NOTIF_HISTORY_TOKEN"]))
 {
     app.Logger.LogWarning(
         "NOTIF_HISTORY_TOKEN is not set. Notification history accepts requests without an internal token — restrict network access in non-dev environments.");
+}
+
+if (!jobEventsEnabled)
+{
+    app.Logger.LogWarning(
+        "Job approval/rejection emails are disabled (NOTIF_JOB_EVENTS_ENABLED is not true). "
+        + "Enabling requires a recruiter recipient lookup and the job.updated previousStatus/rejectionReason contract.");
 }
 
 using (var scope = app.Services.CreateScope())
