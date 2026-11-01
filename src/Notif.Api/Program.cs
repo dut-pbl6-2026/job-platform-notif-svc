@@ -1,5 +1,6 @@
 using Microsoft.EntityFrameworkCore;
 using Notif.Api.Endpoints;
+using Notif.Api.Observability;
 using Notif.Core.Interfaces;
 using Notif.Infrastructure.Data;
 using Notif.Infrastructure.Services;
@@ -8,12 +9,8 @@ using SharedKernel.Kafka;
 
 var builder = WebApplication.CreateBuilder(args);
 
-builder.Logging.ClearProviders();
-builder.Logging.AddJsonConsole(o =>
-{
-    o.IncludeScopes = true;
-    o.TimestampFormat = "yyyy-MM-ddTHH:mm:ssZ";
-});
+// PBL6-49: Serilog (compact JSON in non-Development) + correlation id
+builder.AddServiceLogging("notification");
 
 static bool IsUnusable(string? v) =>
     string.IsNullOrWhiteSpace(v)
@@ -40,6 +37,7 @@ if (IsUnusable(conn))
 }
 
 builder.Services.AddDbContext<NotifDbContext>(o => o.UseNpgsql(conn));
+builder.Services.AddServiceHealthChecks<NotifDbContext>(builder.Configuration, kafka: true, smtp: true);
 
 builder.Services.AddSingleton<INotificationService>(sp =>
 {
@@ -79,6 +77,7 @@ builder.Services.AddSwaggerGen(o =>
 
 var app = builder.Build();
 
+app.UseServiceLogging();
 app.UseExceptionHandler();
 
 if (app.Environment.IsDevelopment())
@@ -87,9 +86,8 @@ if (app.Environment.IsDevelopment())
     app.UseSwaggerUI();
 }
 
-app.MapGet("/health", () => Results.Ok(new { status = "ok", service = "notification" }))
-    .WithTags("Health")
-    .ExcludeFromDescription();
+// /health = static liveness, /health/ready = dependency checks (PBL6-49)
+app.MapServiceHealth("notification");
 
 app.MapGet("/", () => Results.Ok(new { service = "notification", version = "0.1.0" }))
     .ExcludeFromDescription();
