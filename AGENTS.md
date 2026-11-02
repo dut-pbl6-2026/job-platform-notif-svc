@@ -17,7 +17,7 @@ Agent uses `mise exec -- dotnet ...` / `mise exec -- infisical ...` due to non-i
 
 ## Scope
 
-`PBL6-35` MUST `NOTIF-01` — Email notification delivery triggered by Kafka application-events. `Port 5007` `net10.0` `YARP gateway`. Owner TM2 W4. DB `job_platform_notif` (Postgres — idempotency log only).
+`PBL6-35` MUST `NOTIF-01` — Email notification delivery triggered by Kafka application-events. `Port 5006` `net10.0` `YARP gateway`. Owner TM2 W4. DB `job_platform_notif` (Postgres — idempotency log only).
 
 ## Architecture — clean Api/Core/Infrastructure
 
@@ -57,7 +57,7 @@ Dependency: `Api → Infrastructure → Core → SharedKernel` (`PackageReferenc
 | Category | Examples of forbidden literals |
 |----------|--------------------------------|
 | Connection strings | `Host=localhost;Port=5432;Database=job_platform_notif;...` |
-| Ports / URLs | `http://localhost:5007`, `5007` |
+| Ports / URLs | `http://localhost:5006`, `5006` |
 | Secrets / passwords | plain-text SMTP credentials |
 | Email addresses | `recruiter@job-platform.local` (except `appsettings.Development.json`) |
 
@@ -78,7 +78,7 @@ mise trust && mise install
 mise run sync-env && mise run verify
 mise run build && mise run test && mise run format
 mise run ef-check
-mise run run  # http://localhost:5007/health → {"status":"ok","service":"notification"}
+mise run run  # http://localhost:5006/health → {"status":"ok","service":"notification"}
 ```
 
 ## Git convention (git-strategy.md)

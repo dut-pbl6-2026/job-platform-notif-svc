@@ -5,6 +5,7 @@ using Notif.Infrastructure.Data;
 using Notif.Infrastructure.Services;
 using Notif.Infrastructure.Workers;
 using SharedKernel.Kafka;
+using OpenTelemetry.Metrics;
 
 var builder = WebApplication.CreateBuilder(args);
 
@@ -14,6 +15,17 @@ builder.Logging.AddJsonConsole(o =>
     o.IncludeScopes = true;
     o.TimestampFormat = "yyyy-MM-ddTHH:mm:ssZ";
 });
+
+// Monitoring: expose OpenTelemetry metrics on /metrics (Prometheus scrape target).
+builder.Services.AddOpenTelemetry()
+    .WithMetrics(metrics =>
+    {
+        metrics
+            .AddAspNetCoreInstrumentation()
+            .AddHttpClientInstrumentation()
+            .AddRuntimeInstrumentation()
+            .AddPrometheusExporter();
+    });
 
 static bool IsUnusable(string? v) =>
     string.IsNullOrWhiteSpace(v)
@@ -85,6 +97,13 @@ if (app.Environment.IsDevelopment())
 {
     app.UseSwagger();
     app.UseSwaggerUI();
+}
+
+// Monitoring: /metrics is meant for the internal scrape network; keep it off in
+// Production unless METRICS_ENABLED=true (all services are publicly reachable).
+if (app.Configuration.GetValue("METRICS_ENABLED", !app.Environment.IsProduction()))
+{
+    app.MapPrometheusScrapingEndpoint();
 }
 
 app.MapGet("/health", () => Results.Ok(new { status = "ok", service = "notification" }))
