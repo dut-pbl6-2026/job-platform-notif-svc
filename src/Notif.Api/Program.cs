@@ -6,11 +6,23 @@ using Notif.Infrastructure.Data;
 using Notif.Infrastructure.Services;
 using Notif.Infrastructure.Workers;
 using SharedKernel.Kafka;
+using OpenTelemetry.Metrics;
 
 var builder = WebApplication.CreateBuilder(args);
 
 // PBL6-49: Serilog (compact JSON in non-Development) + correlation id
 builder.AddServiceLogging("notification");
+
+// Monitoring: expose OpenTelemetry metrics on /metrics (Prometheus scrape target).
+builder.Services.AddOpenTelemetry()
+    .WithMetrics(metrics =>
+    {
+        metrics
+            .AddAspNetCoreInstrumentation()
+            .AddHttpClientInstrumentation()
+            .AddRuntimeInstrumentation()
+            .AddPrometheusExporter();
+    });
 
 static bool IsUnusable(string? v) =>
     string.IsNullOrWhiteSpace(v)
@@ -37,7 +49,7 @@ if (IsUnusable(conn))
 }
 
 builder.Services.AddDbContext<NotifDbContext>(o => o.UseNpgsql(conn));
-builder.Services.AddServiceHealthChecks<NotifDbContext>(builder.Configuration, kafka: true, smtp: true);
+builder.Services.AddServiceHealthChecks<NotifDbContext>(builder.Configuration);
 
 builder.Services.AddSingleton<INotificationService>(sp =>
 {
@@ -68,6 +80,25 @@ builder.Services.Configure<KafkaOptions>(o =>
 });
 builder.Services.AddHostedService<ApplicationEventsConsumer>();
 
+// feat(admin) Slice 5: job approval/rejection emails to recruiters.
+// Gated (NOTIF_JOB_EVENTS_ENABLED, off by default): JobUpdatedEvent carries neither the
+// recruiter's address nor a previous-status transition, so running it by default would
+// mail the shared fallback inbox and label ordinary edits of live jobs as approvals.
+var jobEventsEnabled = JobEventsConsumer.IsEnabled(builder.Configuration);
+if (jobEventsEnabled)
+{
+    var jobEventsRecipient = builder.Configuration["NOTIF_DEFAULT_RECIPIENT"]
+        ?? builder.Configuration["SMTP_FROM"];
+    if (IsUnusable(jobEventsRecipient))
+    {
+        throw new InvalidOperationException(
+            "NOTIF_JOB_EVENTS_ENABLED=true requires NOTIF_DEFAULT_RECIPIENT or SMTP_FROM. "
+            + "Refusing to start a consumer that cannot deliver notifications.");
+    }
+
+    builder.Services.AddHostedService<JobEventsConsumer>();
+}
+
 builder.Services.AddProblemDetails();
 builder.Services.AddEndpointsApiExplorer();
 builder.Services.AddSwaggerGen(o =>
@@ -88,6 +119,13 @@ if (app.Environment.IsDevelopment())
 
 // /health = static liveness, /health/ready = dependency checks (PBL6-49)
 app.MapServiceHealth("notification");
+
+// Monitoring: /metrics is meant for the internal scrape network; keep it off in
+// Production unless METRICS_ENABLED=true (all services are publicly reachable).
+if (app.Configuration.GetValue("METRICS_ENABLED", !app.Environment.IsProduction()))
+{
+    app.MapPrometheusScrapingEndpoint();
+}
 
 app.MapGet("/", () => Results.Ok(new { service = "notification", version = "0.1.0" }))
     .ExcludeFromDescription();
@@ -110,6 +148,13 @@ if (string.IsNullOrWhiteSpace(app.Configuration["NOTIF_HISTORY_TOKEN"]))
 {
     app.Logger.LogWarning(
         "NOTIF_HISTORY_TOKEN is not set. Notification history accepts requests without an internal token — restrict network access in non-dev environments.");
+}
+
+if (!jobEventsEnabled)
+{
+    app.Logger.LogWarning(
+        "Job approval/rejection emails are disabled (NOTIF_JOB_EVENTS_ENABLED is not true). "
+        + "Enabling requires a recruiter recipient lookup and the job.updated previousStatus/rejectionReason contract.");
 }
 
 using (var scope = app.Services.CreateScope())

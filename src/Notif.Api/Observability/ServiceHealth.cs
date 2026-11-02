@@ -7,7 +7,7 @@ using Microsoft.Extensions.Diagnostics.HealthChecks;
 namespace Notif.Api.Observability;
 
 /// <summary>
-/// PBL6-49: <c>/health</c> stays a static liveness probe (Render healthCheckPath);
+/// PBL6-49: <c>/health</c> stays a static liveness probe;
 /// <c>/health/ready</c> runs short-timeout dependency checks.
 /// DB failure = Unhealthy (503). Kafka/SMTP failure = Degraded (still 200) and
 /// those checks are only registered when the dependency is configured.
@@ -17,37 +17,31 @@ public static class ServiceHealth
     public const string ReadyTag = "ready";
 
     public static IServiceCollection AddServiceHealthChecks<TDb>(
-        this IServiceCollection services, IConfiguration config, bool kafka = false, bool smtp = false)
+        this IServiceCollection services, IConfiguration config)
         where TDb : DbContext
     {
         var checks = services.AddHealthChecks();
         checks.AddCheck<DbContextHealthCheck<TDb>>("database", HealthStatus.Unhealthy, [ReadyTag]);
 
-        if (kafka)
+        var servers = config["KAFKA_BOOTSTRAP_SERVERS"] ?? config["Kafka:BootstrapServers"];
+        if (IsConfigured(servers))
         {
-            var servers = config["KAFKA_BOOTSTRAP_SERVERS"] ?? config["Kafka:BootstrapServers"];
-            if (!string.IsNullOrWhiteSpace(servers))
-            {
-                checks.Add(new HealthCheckRegistration(
-                    "kafka",
-                    new TcpHealthCheck(ParseEndpoints(servers, 9092)),
-                    HealthStatus.Degraded,
-                    [ReadyTag]));
-            }
+            checks.Add(new HealthCheckRegistration(
+                "kafka",
+                new TcpHealthCheck(ParseEndpoints(servers!, 9092)),
+                HealthStatus.Degraded,
+                [ReadyTag]));
         }
 
-        if (smtp)
+        var host = config["SMTP_HOST"];
+        if (IsConfigured(host))
         {
-            var host = config["SMTP_HOST"];
-            if (!string.IsNullOrWhiteSpace(host))
-            {
-                var port = int.TryParse(config["SMTP_PORT"], out var p) ? p : 587;
-                checks.Add(new HealthCheckRegistration(
-                    "smtp",
-                    new TcpHealthCheck([(host.Trim(), port)]),
-                    HealthStatus.Degraded,
-                    [ReadyTag]));
-            }
+            var port = int.TryParse(config["SMTP_PORT"], out var p) ? p : 587;
+            checks.Add(new HealthCheckRegistration(
+                "smtp",
+                new TcpHealthCheck([(host!.Trim(), port)]),
+                HealthStatus.Degraded,
+                [ReadyTag]));
         }
 
         return services;
@@ -58,7 +52,6 @@ public static class ServiceHealth
     {
         app.MapGet("/health", () => Results.Ok(new { status = "ok", service }))
             .WithTags("Health")
-            .WithName("HealthCheck")
             .ExcludeFromDescription();
 
         app.MapHealthChecks("/health/ready", new HealthCheckOptions
@@ -69,6 +62,17 @@ public static class ServiceHealth
 
         return app;
     }
+
+    /// <summary>
+    /// A value counts as configured only if it is non-blank and not a deployment placeholder
+    /// (e.g. <c>__SET_VIA_INFISICAL__</c>, <c>&lt;set via ...&gt;</c>, unresolved <c>${VAR}</c>);
+    /// otherwise a template config would leave readiness permanently degraded.
+    /// </summary>
+    internal static bool IsConfigured(string? value) =>
+        !string.IsNullOrWhiteSpace(value)
+        && !value.TrimStart().StartsWith("__", StringComparison.Ordinal)
+        && !value.TrimStart().StartsWith("<set via", StringComparison.OrdinalIgnoreCase)
+        && !value.Contains("${", StringComparison.Ordinal);
 
     internal static (string Host, int Port)[] ParseEndpoints(string servers, int defaultPort)
     {
@@ -82,10 +86,25 @@ public static class ServiceHealth
                 entry = entry[(scheme + 3)..];
             }
 
-            var colon = entry.LastIndexOf(':');
-            if (colon > 0 && int.TryParse(entry[(colon + 1)..], out var port))
+            if (entry.StartsWith('['))
             {
-                result.Add((entry[..colon], port));
+                // Bracketed IPv6: [::1] or [::1]:9092 — the host is whatever is inside the brackets.
+                var close = entry.IndexOf(']');
+                if (close > 1)
+                {
+                    var host = entry[1..close];
+                    var rest = entry[(close + 1)..];
+                    var port = rest.StartsWith(':') && int.TryParse(rest[1..], out var p) ? p : defaultPort;
+                    result.Add((host, port));
+                }
+
+                continue;
+            }
+
+            var colon = entry.LastIndexOf(':');
+            if (colon > 0 && entry.IndexOf(':') == colon && int.TryParse(entry[(colon + 1)..], out var port2))
+            {
+                result.Add((entry[..colon], port2));
             }
             else if (entry.Length > 0)
             {

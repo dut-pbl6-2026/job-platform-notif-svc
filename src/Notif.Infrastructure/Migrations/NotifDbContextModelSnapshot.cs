@@ -46,6 +46,11 @@ namespace Notif.Infrastructure.Migrations
                         .HasMaxLength(64)
                         .HasColumnType("character varying(64)");
 
+                    b.Property<string>("IdempotencyKey")
+                        .IsRequired()
+                        .HasMaxLength(128)
+                        .HasColumnType("character varying(128)");
+
                     b.Property<string>("RecipientEmail")
                         .IsRequired()
                         .HasMaxLength(256)
@@ -79,7 +84,7 @@ namespace Notif.Infrastructure.Migrations
 
                     b.HasKey("Id");
 
-                    b.HasIndex("ApplicationId", "EventType", "StatusSnapshot")
+                    b.HasIndex("ApplicationId", "EventType", "IdempotencyKey")
                         .IsUnique();
 
                     b.ToTable("notification_logs", (string)null);

@@ -17,7 +17,7 @@ Agent uses `mise exec -- dotnet ...` / `mise exec -- infisical ...` due to non-i
 
 ## Scope
 
-`PBL6-35` MUST `NOTIF-01` — Email notification delivery triggered by Kafka application-events. `Port 5007` `net10.0` `YARP gateway`. Owner TM2 W4. DB `job_platform_notif` (Postgres — idempotency log only).
+`PBL6-35` MUST `NOTIF-01` — Email notification delivery triggered by Kafka application-events. `Port 5006` `net10.0` `YARP gateway`. Owner TM2 W4. DB `job_platform_notif` (Postgres — idempotency log only).
 
 ## Architecture — clean Api/Core/Infrastructure
 
@@ -33,17 +33,20 @@ Dependency: `Api → Infrastructure → Core → SharedKernel` (`PackageReferenc
 
 ## SRS mapping (NOTIF-01)
 
-- `ApplicationEventsConsumer` — Consumes `application-events` topic (group `notif-svc`):
+- `ApplicationEventsConsumer` — Consumes `application-events` topic (group `notif-svc`, the default for `KAFKA_GROUP_NOTIF`):
   - `application.submitted` → email recruiter template (NOTIF-01-03).
   - `application.status_changed` / `application.updated` → email applicant template (NOTIF-01-01).
   - Unknown or poison messages: `MessageOutcome.Skip` (offset committed, no retry loop).
-  - Idempotency: unique index on `(ApplicationId, EventType, StatusSnapshot)` in `notification_logs`. Concurrent delivery handled via Postgres `23505` unique-violation catch.
+  - Idempotency: unique index on `(ApplicationId, EventType, IdempotencyKey)` in `notification_logs`; application notifications default the key to the status snapshot, while `JobEventsConsumer` uses the envelope event id. Concurrent delivery handled via Postgres `23505` unique-violation catch.
+- `JobEventsConsumer` — Consumes `job-events` topic (group `notif-svc-job`, the default for `KAFKA_GROUP_JOB_NOTIF`; **must stay distinct** from the application consumer's `notif-svc` group) for admin approval emails. **Gated by `NOTIF_JOB_EVENTS_ENABLED` (off by default)**: `JobUpdatedEvent` carries no recruiter address and no `previousStatus` transition yet, so enabling it in production needs the PBL6-35 recipient lookup plus the job-svc contract change. When enabled it only mails on a real transition (`Active` from another status = approved, `Rejected` from another status = rejected); an edit of an already-live job is silent. Missing `previousStatus`/`rejectionReason` are read from the raw envelope so the shared contract can grow without a package bump. Idempotency is per Kafka event (envelope `eventId`), so redelivery is deduped but a later `Rejected`/`Active` transition for the same job still emails.
 - `GET /api/notifications/history` (NOTIF-01-06) — Paginated delivery log (PII). Requires `X-Internal-Token == NOTIF_HISTORY_TOKEN` when configured.
 - `GET /health` — `{"status":"ok","service":"notification"}`.
 
 ## Recipient resolution (STUB — follow-up required)
 
 `ResolveRecipient` in `ApplicationEventsConsumer` currently sends all emails to a configured fallback address (`NOTIF_DEFAULT_RECIPIENT` → `SMTP_FROM`). Real recipient lookup from auth/profile service is a follow-up task (PBL6-35 acceptance criterion). **Do not remove the `[STUB]` warning log until real lookup is implemented.**
+
+The same limitation applies to `JobEventsConsumer`, which is why it stays behind `NOTIF_JOB_EVENTS_ENABLED`: enabling it without a real lookup mails the fallback inbox. When enabled, a missing recipient fails startup (fail fast) instead of returning `Retry` forever, and a runtime miss returns `Skip` so the partition never stalls.
 
 ## Email templates
 
@@ -57,13 +60,13 @@ Dependency: `Api → Infrastructure → Core → SharedKernel` (`PackageReferenc
 | Category | Examples of forbidden literals |
 |----------|--------------------------------|
 | Connection strings | `Host=localhost;Port=5432;Database=job_platform_notif;...` |
-| Ports / URLs | `http://localhost:5007`, `5007` |
+| Ports / URLs | `http://localhost:5006`, `5006` |
 | Secrets / passwords | plain-text SMTP credentials |
 | Email addresses | `recruiter@job-platform.local` (except `appsettings.Development.json`) |
 
 **Always** read from `IConfiguration` / environment variables. Dev-only fallbacks in `appsettings.Development.json` only.
 
-- Required env vars: `DATABASE_URL_NOTIF`, `KAFKA_BOOTSTRAP_SERVERS`, `KAFKA_TOPIC_APPLICATION_EVENTS`, `KAFKA_GROUP_NOTIF`, `SMTP_HOST`, `SMTP_PORT`, `SMTP_USER`, `SMTP_PASS`, `SMTP_FROM`, `NOTIF_DEFAULT_RECIPIENT`, `NOTIF_HISTORY_TOKEN`, `NOTIF_BASE_URL`.
+- Required env vars: `DATABASE_URL_NOTIF`, `KAFKA_BOOTSTRAP_SERVERS`, `KAFKA_TOPIC_APPLICATION_EVENTS`, `KAFKA_GROUP_NOTIF`, `KAFKA_TOPIC_JOB_EVENTS`, `KAFKA_GROUP_JOB_NOTIF`, `NOTIF_JOB_EVENTS_ENABLED`, `SMTP_HOST`, `SMTP_PORT`, `SMTP_USER`, `SMTP_PASS`, `SMTP_FROM`, `NOTIF_DEFAULT_RECIPIENT`, `NOTIF_HISTORY_TOKEN`, `NOTIF_BASE_URL`.
 
 ## 2026 best practice (NFR `MAINT`)
 
@@ -78,7 +81,7 @@ mise trust && mise install
 mise run sync-env && mise run verify
 mise run build && mise run test && mise run format
 mise run ef-check
-mise run run  # http://localhost:5007/health → {"status":"ok","service":"notification"}
+mise run run  # http://localhost:5006/health → {"status":"ok","service":"notification"}
 ```
 
 ## Git convention (git-strategy.md)

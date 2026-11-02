@@ -36,7 +36,9 @@ jobs:
         with: { distribution: temurin, java-version: "17" }
       - name: Install SonarScanner
         if: env.SONAR_TOKEN != ''
-        run: dotnet tool install --global dotnet-sonarscanner --version 11.2.1
+        run: |
+          dotnet tool install --global dotnet-sonarscanner --version 11.2.1
+          echo "$HOME/.dotnet/tools" >> "$GITHUB_PATH"
       - name: SonarCloud begin
         if: env.SONAR_TOKEN != ''
         run: >

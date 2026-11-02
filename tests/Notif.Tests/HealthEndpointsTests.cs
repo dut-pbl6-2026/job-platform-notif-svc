@@ -1,4 +1,5 @@
 using System.Net;
+using System.Net.Sockets;
 using System.Text.Json;
 using Notif.Api.Observability;
 using Notif.Infrastructure.Data;
@@ -39,7 +40,7 @@ public class HealthEndpointsTests
             builder.Services.AddDbContext<NotifDbContext>(o => o.UseNpgsql(UnreachableDb));
         }
 
-        builder.Services.AddServiceHealthChecks<NotifDbContext>(builder.Configuration, kafka: true, smtp: true);
+        builder.Services.AddServiceHealthChecks<NotifDbContext>(builder.Configuration);
 
         var app = builder.Build();
         app.UseServiceLogging();
@@ -157,5 +158,74 @@ public class HealthEndpointsTests
 
         var id = Assert.Single(res.Headers.GetValues(ServiceLogging.CorrelationHeader));
         Assert.Matches("^[0-9a-f]{32}$", id);
+    }
+
+    [Theory]
+    [InlineData("127.0.0.1:9092", "127.0.0.1", 9092)]
+    [InlineData("broker", "broker", 9092)]
+    [InlineData("SASL_SSL://broker:9093", "broker", 9093)]
+    [InlineData("[::1]:9094", "::1", 9094)]
+    [InlineData("[::1]", "::1", 9092)]
+    public void ParseEndpoints_ParsesSingleEntry(string input, string host, int port)
+    {
+        var endpoints = ServiceHealth.ParseEndpoints(input, 9092);
+
+        var only = Assert.Single(endpoints);
+        Assert.Equal(host, only.Host);
+        Assert.Equal(port, only.Port);
+    }
+
+    [Fact]
+    public void ParseEndpoints_ParsesMultipleEntries()
+    {
+        var endpoints = ServiceHealth.ParseEndpoints("a:1, b:2 ,[::1]:3", 9092);
+
+        Assert.Equal([("a", 1), ("b", 2), ("::1", 3)], endpoints);
+    }
+
+    [Theory]
+    [InlineData("__SET_VIA_INFISICAL__")]
+    [InlineData("<set via infisical>")]
+    [InlineData("${KAFKA_BOOTSTRAP_SERVERS}")]
+    [InlineData("   ")]
+    [InlineData(null)]
+    public void IsConfigured_RejectsPlaceholders(string? value) =>
+        Assert.False(ServiceHealth.IsConfigured(value));
+
+    [Fact]
+    public void IsConfigured_AcceptsRealValue() =>
+        Assert.True(ServiceHealth.IsConfigured("broker:9092"));
+
+    [Fact]
+    public async Task Ready_WithReachableKafka_ReportsKafkaHealthy()
+    {
+        using var listener = new TcpListener(System.Net.IPAddress.Loopback, 0);
+        listener.Start();
+        var port = ((System.Net.IPEndPoint)listener.LocalEndpoint).Port;
+        await using var app = await StartAsync(config: new() { ["KAFKA_BOOTSTRAP_SERVERS"] = $"127.0.0.1:{port}" });
+
+        var (res, body) = await GetJsonAsync(app, "/health/ready");
+
+        Assert.Equal(HttpStatusCode.OK, res.StatusCode);
+        var kafka = body.GetProperty("checks").EnumerateArray().Single(c => c.GetProperty("name").GetString() == "kafka");
+        Assert.Equal("healthy", kafka.GetProperty("status").GetString());
+    }
+
+    [Fact]
+    public async Task Ready_WithPlaceholderConfig_DoesNotRegisterKafkaOrSmtp()
+    {
+        await using var app = await StartAsync(config: new()
+        {
+            ["KAFKA_BOOTSTRAP_SERVERS"] = "__SET_VIA_INFISICAL__",
+            ["SMTP_HOST"] = "__SET_VIA_INFISICAL__"
+        });
+
+        var (res, body) = await GetJsonAsync(app, "/health/ready");
+
+        Assert.Equal(HttpStatusCode.OK, res.StatusCode);
+        Assert.Equal("healthy", body.GetProperty("status").GetString());
+        var names = body.GetProperty("checks").EnumerateArray().Select(c => c.GetProperty("name").GetString()).ToList();
+        Assert.DoesNotContain("kafka", names);
+        Assert.DoesNotContain("smtp", names);
     }
 }

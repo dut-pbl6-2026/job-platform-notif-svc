@@ -67,6 +67,8 @@ public class ApplicationEventsConsumerRetryTests
         {
         }
 
+        public string Group => GroupId;
+
         public Task<MessageOutcome> HandleAsync(string value, CancellationToken ct = default)
             => HandleMessageAsync(null, value, ct);
     }
@@ -88,6 +90,14 @@ public class ApplicationEventsConsumerRetryTests
             applicationId, Guid.NewGuid(), "Backend Dev", Guid.NewGuid(), DateTime.UtcNow);
         var envelope = EventEnvelope<ApplicationSubmittedEvent>.Create(ApplicationEventTypes.Submitted, payload);
         return JsonSerializer.Serialize(envelope, KafkaJson.Options);
+    }
+
+    [Fact]
+    public void GroupId_DefaultsToApplicationConsumerGroup()
+    {
+        var (consumer, _, _) = Build(Guid.NewGuid().ToString());
+
+        Assert.Equal("notif-svc", consumer.Group);
     }
 
     [Fact]
