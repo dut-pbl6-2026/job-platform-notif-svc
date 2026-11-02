@@ -18,9 +18,10 @@ public class NotifDbContext : DbContext
         {
             b.ToTable("notification_logs");
             b.HasKey(e => e.Id);
-            b.HasIndex(e => new { e.ApplicationId, e.EventType, e.StatusSnapshot }).IsUnique();
+            b.HasIndex(e => new { e.ApplicationId, e.EventType, e.IdempotencyKey }).IsUnique();
             b.Property(e => e.EventType).HasMaxLength(64).IsRequired();
             b.Property(e => e.StatusSnapshot).HasMaxLength(64).IsRequired();
+            b.Property(e => e.IdempotencyKey).HasMaxLength(128).IsRequired();
             b.Property(e => e.RecipientEmail).HasMaxLength(256).IsRequired();
             b.Property(e => e.Subject).HasMaxLength(256).IsRequired();
             b.Property(e => e.TemplateName).HasMaxLength(64).IsRequired();
