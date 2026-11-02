@@ -11,6 +11,8 @@ public static class EmailTemplates
 {
     public const string ApplicationSubmitted = "application-submitted";
     public const string ApplicationStatusChanged = "application-status-changed";
+    public const string JobApproved = "job-approved";
+    public const string JobRejected = "job-rejected";
 
     public static (string Subject, string Html, string Text) SubmittedToRecruiter(
         string jobTitle, Guid applicationId, Guid applicantId, Guid jobId, string baseUrl = "")
@@ -39,4 +41,40 @@ public static class EmailTemplates
         var text = $"Your application for {safeTitle} has been {safeStatus}.\nGood luck with the next steps.";
         return (subject, html, text);
     }
+
+    /// <summary>
+    /// Recruiter notification for an admin-approved job (feat(admin) Slice 5, JOB-01).
+    /// </summary>
+    public static (string Subject, string Html, string Text) JobApprovedToRecruiter(
+        string recruiterName, string jobTitle)
+    {
+        var greeting = Greeting(recruiterName);
+        var safeTitle = string.IsNullOrWhiteSpace(jobTitle) ? "your job" : jobTitle.Trim();
+        var subject = $"Your job \"{safeTitle}\" has been approved";
+        var html = $"<p>{WebUtility.HtmlEncode(greeting)},</p>"
+            + $"<p>Your job <strong>{WebUtility.HtmlEncode(safeTitle)}</strong> has been approved and is now live on the platform.</p>";
+        var text = $"{greeting},\nYour job \"{safeTitle}\" has been approved and is now live on the platform.";
+        return (subject, html, text);
+    }
+
+    /// <summary>
+    /// Recruiter notification for an admin-rejected job (feat(admin) Slice 5, JOB-01).
+    /// The reason is plain text from the admin and is HTML-encoded on render.
+    /// </summary>
+    public static (string Subject, string Html, string Text) JobRejectedToRecruiter(
+        string recruiterName, string jobTitle, string? reason)
+    {
+        var greeting = Greeting(recruiterName);
+        var safeTitle = string.IsNullOrWhiteSpace(jobTitle) ? "your job" : jobTitle.Trim();
+        var safeReason = string.IsNullOrWhiteSpace(reason) ? "No reason provided." : reason.Trim();
+        var subject = $"Your job \"{safeTitle}\" was not approved";
+        var html = $"<p>{WebUtility.HtmlEncode(greeting)},</p>"
+            + $"<p>Your job <strong>{WebUtility.HtmlEncode(safeTitle)}</strong> was not approved.</p>"
+            + $"<p>Reason: {WebUtility.HtmlEncode(safeReason)}</p>";
+        var text = $"{greeting},\nYour job \"{safeTitle}\" was not approved.\nReason: {safeReason}";
+        return (subject, html, text);
+    }
+
+    private static string Greeting(string recruiterName) =>
+        string.IsNullOrWhiteSpace(recruiterName) ? "Hello" : $"Hello {recruiterName.Trim()}";
 }

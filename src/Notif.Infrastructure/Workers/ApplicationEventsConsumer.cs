@@ -1,5 +1,4 @@
 using System.Text.Json;
-using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging;
@@ -8,7 +7,7 @@ using Notif.Core.Entities;
 using Notif.Core.Interfaces;
 using Notif.Core.Templates;
 using Notif.Infrastructure.Data;
-using Npgsql;
+using Notif.Infrastructure.Services;
 using SharedKernel.Events;
 using SharedKernel.Kafka;
 
@@ -128,87 +127,11 @@ public class ApplicationEventsConsumer : KafkaConsumerService
         using var scope = _services.CreateScope();
         var db = scope.ServiceProvider.GetRequiredService<NotifDbContext>();
         var sender = scope.ServiceProvider.GetRequiredService<INotificationService>();
-        // Lower-cased so "Accepted" and "accepted" share one idempotency row.
-        var normalizedStatus = (statusSnapshot?.Trim() ?? string.Empty).ToLowerInvariant();
-        var existing = await db.NotificationLogs.FirstOrDefaultAsync(
-            x => x.ApplicationId == applicationId
-                && x.EventType == eventType
-            && x.StatusSnapshot == normalizedStatus,
-            ct);
-
-        if (existing is { Status: "sent" })
-        {
-            _logger.LogInformation(
-                "Notification already sent. ApplicationId={ApplicationId} EventType={EventType} Status={StatusSnapshot}.",
-                applicationId, eventType, normalizedStatus);
-            return MessageOutcome.Handled;
-        }
-
         var recipient = ResolveRecipient(recipientKind);
-        var log = existing ?? new NotificationLog(
-            eventId, applicationId, eventType, normalizedStatus, recipient, subject, template);
 
-        if (existing is null)
-        {
-            db.NotificationLogs.Add(log);
-        }
-
-        try
-        {
-            await sender.SendAsync(recipient, subject, html, text, ct);
-            log.MarkSent();
-            try
-            {
-                await db.SaveChangesAsync(ct);
-            }
-            catch (DbUpdateException dbEx) when (IsUniqueConflict(dbEx))
-            {
-                // A concurrent delivery already logged this notification; the email
-                // went out above, so commit past it instead of looping forever.
-                _logger.LogInformation(
-                    dbEx,
-                    "Notification already logged by a concurrent delivery. ApplicationId={ApplicationId} EventType={EventType}.",
-                    applicationId, eventType);
-                return MessageOutcome.Handled;
-            }
-
-            _logger.LogInformation(
-                "Email sent. ApplicationId={ApplicationId} EventType={EventType} RecipientKind={RecipientKind}.",
-                applicationId, eventType, recipientKind);
-            return MessageOutcome.Handled;
-        }
-        catch (OperationCanceledException) when (ct.IsCancellationRequested)
-        {
-            throw;
-        }
-        catch (Exception ex)
-        {
-            log.MarkFailed(ex.Message);
-            await db.SaveChangesAsync(CancellationToken.None);
-            _logger.LogWarning(
-                ex,
-                "Email send failed. ApplicationId={ApplicationId} EventType={EventType}. Will retry.",
-                applicationId, eventType);
-            return MessageOutcome.Retry;
-        }
-    }
-
-    private static bool IsUniqueConflict(DbUpdateException ex)
-    {
-        Exception? current = ex;
-        while (current is not null)
-        {
-            // Postgres unique_violation (23505), e.g. on
-            // IX_notification_logs_ApplicationId_EventType_StatusSnapshot.
-            if (current is PostgresException pg && pg.SqlState == "23505")
-            {
-                return true;
-            }
-
-            current = current.InnerException;
-        }
-
-        return false;
+        return await NotificationDelivery.SendAndLogAsync(
+            db, sender, _logger, eventId, applicationId, eventType, statusSnapshot,
+            recipient, subject, html, text, template, ct);
     }
 
     private string ResolveRecipient(string kind)

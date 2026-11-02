@@ -2,7 +2,12 @@ using SharedKernel;
 
 namespace Notif.Core.Entities;
 
-/// <summary>Persistent idempotency and delivery log for application notifications.</summary>
+/// <summary>Persistent idempotency and delivery log for Kafka-triggered notifications.</summary>
+/// <remarks>
+/// <see cref="ApplicationId"/> stores the event aggregate id: the application id for
+/// application events, and the job id for job-approval events. The unique index over
+/// (aggregate id, event type, status snapshot) is what makes consumer redelivery safe.
+/// </remarks>
 public sealed class NotificationLog : Entity
 {
     public Guid EventId { get; private set; }
