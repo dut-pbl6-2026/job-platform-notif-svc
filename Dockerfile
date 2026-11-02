@@ -6,7 +6,7 @@ COPY local-feed/ ./local-feed/
 COPY nuget.config ./
 COPY NotifService.sln ./
 COPY src/ ./src/
-RUN dotnet restore NotifService.sln
+RUN dotnet restore src/Notif.Api/Notif.Api.csproj
 RUN dotnet publish src/Notif.Api/Notif.Api.csproj -c Release -o /out --no-restore
 
 FROM mcr.microsoft.com/dotnet/aspnet:10.0 AS runtime

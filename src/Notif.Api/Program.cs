@@ -1,5 +1,6 @@
 using Microsoft.EntityFrameworkCore;
 using Notif.Api.Endpoints;
+using Notif.Api.Observability;
 using Notif.Core.Interfaces;
 using Notif.Infrastructure.Data;
 using Notif.Infrastructure.Services;
@@ -9,12 +10,8 @@ using OpenTelemetry.Metrics;
 
 var builder = WebApplication.CreateBuilder(args);
 
-builder.Logging.ClearProviders();
-builder.Logging.AddJsonConsole(o =>
-{
-    o.IncludeScopes = true;
-    o.TimestampFormat = "yyyy-MM-ddTHH:mm:ssZ";
-});
+// PBL6-49: Serilog (compact JSON in non-Development) + correlation id
+builder.AddServiceLogging("notification");
 
 // Monitoring: expose OpenTelemetry metrics on /metrics (Prometheus scrape target).
 builder.Services.AddOpenTelemetry()
@@ -52,6 +49,7 @@ if (IsUnusable(conn))
 }
 
 builder.Services.AddDbContext<NotifDbContext>(o => o.UseNpgsql(conn));
+builder.Services.AddServiceHealthChecks<NotifDbContext>(builder.Configuration);
 
 builder.Services.AddSingleton<INotificationService>(sp =>
 {
@@ -110,6 +108,7 @@ builder.Services.AddSwaggerGen(o =>
 
 var app = builder.Build();
 
+app.UseServiceLogging();
 app.UseExceptionHandler();
 
 if (app.Environment.IsDevelopment())
@@ -118,16 +117,15 @@ if (app.Environment.IsDevelopment())
     app.UseSwaggerUI();
 }
 
+// /health = static liveness, /health/ready = dependency checks (PBL6-49)
+app.MapServiceHealth("notification");
+
 // Monitoring: /metrics is meant for the internal scrape network; keep it off in
 // Production unless METRICS_ENABLED=true (all services are publicly reachable).
 if (app.Configuration.GetValue("METRICS_ENABLED", !app.Environment.IsProduction()))
 {
     app.MapPrometheusScrapingEndpoint();
 }
-
-app.MapGet("/health", () => Results.Ok(new { status = "ok", service = "notification" }))
-    .WithTags("Health")
-    .ExcludeFromDescription();
 
 app.MapGet("/", () => Results.Ok(new { service = "notification", version = "0.1.0" }))
     .ExcludeFromDescription();
