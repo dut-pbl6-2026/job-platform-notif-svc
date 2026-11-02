@@ -26,8 +26,9 @@ namespace Notif.Infrastructure.Workers;
 /// Gated by <see cref="EnabledSetting"/> (off by default): the event carries no
 /// recruiter address, so until a real recipient lookup exists every mail would go to
 /// the configured fallback inbox. Idempotency uses one <c>notification_logs</c> row per
-/// (job id, event type, status) — the job id is stored in the aggregate id column —
-/// so Kafka redelivery and repeated Active updates do not send duplicate emails.
+/// Kafka event — the job id is stored in the aggregate id column and the envelope event
+/// id is the idempotency key — so a redelivered message does not send a duplicate email,
+/// while a later Rejected/Active transition for the same job still notifies.
 /// </para>
 /// </summary>
 public class JobEventsConsumer : KafkaConsumerService
@@ -57,7 +58,10 @@ public class JobEventsConsumer : KafkaConsumerService
 
     protected override string Topic => ResolveSetting("KAFKA_TOPIC_JOB_EVENTS", "job-events");
 
-    protected override string GroupId => ResolveSetting("KAFKA_GROUP_JOB_NOTIF", "notif-svc");
+    // Must stay distinct from ApplicationEventsConsumer's default group ("notif-svc"):
+    // one group spanning two topics can be assigned partitions the consumer never
+    // subscribed to, which stalls or skips application notifications.
+    protected override string GroupId => ResolveSetting("KAFKA_GROUP_JOB_NOTIF", "notif-svc-job");
 
     /// <summary>
     /// Reads <see cref="EnabledSetting"/> as a boolean. Anything other than
@@ -91,6 +95,16 @@ public class JobEventsConsumer : KafkaConsumerService
         if (!TryParseEnvelope<JobUpdatedEvent>(value, out var updated) || updated is null)
         {
             _logger.LogWarning("Kafka poison message on {Topic}: cannot parse {EventType}. Skipping.", Topic, eventType);
+            return MessageOutcome.Skip;
+        }
+
+        if (updated.EventId == Guid.Empty)
+        {
+            // Idempotency is event-scoped: without an event id a redelivery cannot be
+            // told apart from a new transition, so treat the message as poison.
+            _logger.LogWarning(
+                "Kafka poison message on {Topic}: {EventType} has no eventId. Skipping.",
+                Topic, eventType);
             return MessageOutcome.Skip;
         }
 
@@ -166,7 +180,11 @@ public class JobEventsConsumer : KafkaConsumerService
         return await NotificationDelivery.SendAndLogAsync(
             db, sender, _logger, eventId, payload.JobId, JobEventTypes.Updated,
             isRejected ? "rejected" : "active", recipient, subject, html, text,
-            isRejected ? EmailTemplates.JobRejected : EmailTemplates.JobApproved, ct);
+            isRejected ? EmailTemplates.JobRejected : EmailTemplates.JobApproved, ct,
+            // Scope dedupe to the event, not (job, status): a job can be rejected more
+            // than once (rejected -> resubmitted -> rejected) and Active -> Rejected ->
+            // Active is a real second approval. Redelivery reuses the same event id.
+            idempotencyKey: $"event:{eventId:N}");
     }
 
     private static bool IsApprovalOutcome(string status) =>

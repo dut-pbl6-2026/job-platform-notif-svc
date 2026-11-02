@@ -63,6 +63,69 @@ public class JobEventsConsumerTests
     }
 
     [Fact]
+    public async Task JobUpdated_RejectedResubmittedRejectedAgain_SendsForEachTransition()
+    {
+        // Same job, same outcome, but a new event: the second rejection has a new reason
+        // and must not be dropped by an idempotency key scoped to (job, status).
+        var (consumer, sender, provider) = Build();
+        var jobId = Guid.NewGuid();
+
+        var first = await consumer.HandleAsync(
+            Envelope(jobId, "Rejected", previousStatus: "Pending", rejectionReason: "Spam content"));
+        var resubmitted = await consumer.HandleAsync(
+            Envelope(jobId, "Pending", previousStatus: "Rejected"));
+        var second = await consumer.HandleAsync(
+            Envelope(jobId, "Rejected", previousStatus: "Pending", rejectionReason: "Salary below minimum"));
+
+        Assert.Equal(MessageOutcome.Handled, first);
+        Assert.Equal(MessageOutcome.Handled, resubmitted);
+        Assert.Equal(MessageOutcome.Handled, second);
+        Assert.Equal(2, sender.Calls);
+        Assert.Contains("Salary below minimum", sender.LastText);
+
+        using var scope = provider.CreateScope();
+        var db = scope.ServiceProvider.GetRequiredService<NotifDbContext>();
+        var logs = await db.NotificationLogs.ToListAsync();
+        Assert.Equal(2, logs.Count);
+        Assert.Equal(2, logs.Select(l => l.IdempotencyKey).Distinct().Count());
+    }
+
+    [Fact]
+    public async Task JobUpdated_ActiveRejectedActive_SendsForEachTransition()
+    {
+        // Active -> Rejected -> Active: the final approval is a new event and must email
+        // even though an "active" notification was already sent for this job.
+        var (consumer, sender, provider) = Build();
+        var jobId = Guid.NewGuid();
+
+        var approved = await consumer.HandleAsync(
+            Envelope(jobId, "Active", previousStatus: "Pending"));
+        var rejected = await consumer.HandleAsync(
+            Envelope(jobId, "Rejected", previousStatus: "Active", rejectionReason: "Duplicate listing"));
+        var approvedAgain = await consumer.HandleAsync(
+            Envelope(jobId, "Active", previousStatus: "Rejected"));
+
+        Assert.Equal(MessageOutcome.Handled, approved);
+        Assert.Equal(MessageOutcome.Handled, rejected);
+        Assert.Equal(MessageOutcome.Handled, approvedAgain);
+        Assert.Equal(3, sender.Calls);
+
+        using var scope = provider.CreateScope();
+        var db = scope.ServiceProvider.GetRequiredService<NotifDbContext>();
+        Assert.Equal(3, await db.NotificationLogs.CountAsync());
+    }
+
+    [Fact]
+    public void GroupId_DefaultsToDedicatedJobConsumerGroup()
+    {
+        // Sharing a group with the application-events consumer would let this consumer be
+        // assigned partitions it never subscribed to and stall application notifications.
+        var (consumer, _, _) = Build();
+
+        Assert.Equal("notif-svc-job", consumer.Group);
+    }
+
+    [Fact]
     public async Task JobUpdated_Active_EditOfLiveJob_SendsNothing()
     {
         // Ordinary edit of an already-approved job: the event carries no status change.
@@ -175,6 +238,19 @@ public class JobEventsConsumerTests
     }
 
     [Fact]
+    public async Task JobUpdated_EmptyEventId_IsSkipped()
+    {
+        // Event-scoped idempotency needs the envelope event id.
+        var (consumer, sender, _) = Build();
+
+        var outcome = await consumer.HandleAsync(
+            Envelope(Guid.NewGuid(), "Active", previousStatus: "Pending", eventId: Guid.Empty));
+
+        Assert.Equal(MessageOutcome.Skip, outcome);
+        Assert.Equal(0, sender.Calls);
+    }
+
+    [Fact]
     public async Task JobCreated_IsSkipped()
     {
         var (consumer, sender, _) = Build();
@@ -249,7 +325,8 @@ public class JobEventsConsumerTests
         Guid jobId,
         string status,
         string? previousStatus,
-        string? rejectionReason = null)
+        string? rejectionReason = null,
+        Guid? eventId = null)
     {
         var payload = JsonSerializer.SerializeToNode(Payload(jobId, status), KafkaJson.Options)!.AsObject();
         // previousStatus/rejectionReason are not on the shared record yet; the consumer
@@ -259,7 +336,7 @@ public class JobEventsConsumerTests
 
         var envelope = new JsonObject
         {
-            ["eventId"] = Guid.NewGuid(),
+            ["eventId"] = eventId ?? Guid.NewGuid(),
             ["eventType"] = JobEventTypes.Updated,
             ["version"] = 1,
             ["timestamp"] = DateTime.UtcNow,
@@ -320,6 +397,8 @@ public class JobEventsConsumerTests
                 NullLogger<JobEventsConsumer>.Instance)
         {
         }
+
+        public string Group => GroupId;
 
         public Task<MessageOutcome> HandleAsync(string value) =>
             HandleMessageAsync(null, value, CancellationToken.None);

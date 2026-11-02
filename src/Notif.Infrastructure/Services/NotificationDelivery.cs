@@ -10,12 +10,18 @@ namespace Notif.Infrastructure.Services;
 
 /// <summary>
 /// Idempotent notification pipeline shared by the Kafka consumers.
-/// One <see cref="NotificationLog"/> row per (aggregateId, eventType, statusSnapshot):
+/// One <see cref="NotificationLog"/> row per (aggregateId, eventType, idempotencyKey):
 /// a replay short-circuits when the row is already <c>sent</c>, and a failed send is
 /// retried on redelivery while reusing the same row.
 /// </summary>
 internal static class NotificationDelivery
 {
+    /// <summary>
+    /// Sends and records a notification. By default the idempotency key is the status
+    /// snapshot, which keeps application notifications one-per-status. Consumers whose
+    /// aggregate can repeat a status over its lifetime (job approvals/rejections) must
+    /// pass the envelope event id so a later transition is not silently suppressed.
+    /// </summary>
     public static async Task<MessageOutcome> SendAndLogAsync(
         NotifDbContext db,
         INotificationService sender,
@@ -29,26 +35,31 @@ internal static class NotificationDelivery
         string html,
         string text,
         string templateName,
-        CancellationToken ct)
+        CancellationToken ct,
+        string? idempotencyKey = null)
     {
         // Lower-cased so "Accepted" and "accepted" share one idempotency row.
         var normalizedStatus = (statusSnapshot?.Trim() ?? string.Empty).ToLowerInvariant();
+        var key = string.IsNullOrWhiteSpace(idempotencyKey)
+            ? normalizedStatus
+            : idempotencyKey.Trim();
+
         var existing = await db.NotificationLogs.FirstOrDefaultAsync(
             x => x.ApplicationId == aggregateId
                 && x.EventType == eventType
-                && x.StatusSnapshot == normalizedStatus,
+                && x.IdempotencyKey == key,
             ct);
 
         if (existing is { Status: "sent" })
         {
             logger.LogInformation(
-                "Notification already sent. AggregateId={AggregateId} EventType={EventType} Status={StatusSnapshot}.",
-                aggregateId, eventType, normalizedStatus);
+                "Notification already sent. AggregateId={AggregateId} EventType={EventType} IdempotencyKey={IdempotencyKey}.",
+                aggregateId, eventType, key);
             return MessageOutcome.Handled;
         }
 
         var log = existing ?? new NotificationLog(
-            eventId, aggregateId, eventType, normalizedStatus, recipientEmail, subject, templateName);
+            eventId, aggregateId, eventType, normalizedStatus, recipientEmail, subject, templateName, key);
 
         if (existing is null)
         {

@@ -33,12 +33,12 @@ Dependency: `Api → Infrastructure → Core → SharedKernel` (`PackageReferenc
 
 ## SRS mapping (NOTIF-01)
 
-- `ApplicationEventsConsumer` — Consumes `application-events` topic (group `notif-svc`):
+- `ApplicationEventsConsumer` — Consumes `application-events` topic (group `notif-svc`, the default for `KAFKA_GROUP_NOTIF`):
   - `application.submitted` → email recruiter template (NOTIF-01-03).
   - `application.status_changed` / `application.updated` → email applicant template (NOTIF-01-01).
   - Unknown or poison messages: `MessageOutcome.Skip` (offset committed, no retry loop).
-  - Idempotency: unique index on `(ApplicationId, EventType, StatusSnapshot)` in `notification_logs`. Concurrent delivery handled via Postgres `23505` unique-violation catch.
-- `JobEventsConsumer` — Consumes `job-events` topic (group `notif-svc`) for admin approval emails. **Gated by `NOTIF_JOB_EVENTS_ENABLED` (off by default)**: `JobUpdatedEvent` carries no recruiter address and no `previousStatus` transition yet, so enabling it in production needs the PBL6-35 recipient lookup plus the job-svc contract change. When enabled it only mails on a real transition (`Active` from another status = approved, `Rejected` from another status = rejected); an edit of an already-live job is silent. Missing `previousStatus`/`rejectionReason` are read from the raw envelope so the shared contract can grow without a package bump.
+  - Idempotency: unique index on `(ApplicationId, EventType, IdempotencyKey)` in `notification_logs`; application notifications default the key to the status snapshot, while `JobEventsConsumer` uses the envelope event id. Concurrent delivery handled via Postgres `23505` unique-violation catch.
+- `JobEventsConsumer` — Consumes `job-events` topic (group `notif-svc-job`, the default for `KAFKA_GROUP_JOB_NOTIF`; **must stay distinct** from the application consumer's `notif-svc` group) for admin approval emails. **Gated by `NOTIF_JOB_EVENTS_ENABLED` (off by default)**: `JobUpdatedEvent` carries no recruiter address and no `previousStatus` transition yet, so enabling it in production needs the PBL6-35 recipient lookup plus the job-svc contract change. When enabled it only mails on a real transition (`Active` from another status = approved, `Rejected` from another status = rejected); an edit of an already-live job is silent. Missing `previousStatus`/`rejectionReason` are read from the raw envelope so the shared contract can grow without a package bump. Idempotency is per Kafka event (envelope `eventId`), so redelivery is deduped but a later `Rejected`/`Active` transition for the same job still emails.
 - `GET /api/notifications/history` (NOTIF-01-06) — Paginated delivery log (PII). Requires `X-Internal-Token == NOTIF_HISTORY_TOKEN` when configured.
 - `GET /health` — `{"status":"ok","service":"notification"}`.
 
