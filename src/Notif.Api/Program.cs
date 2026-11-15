@@ -91,7 +91,7 @@ builder.Services.Configure<KafkaOptions>(o =>
         ?? builder.Configuration["Kafka:SslCaLocation"] ?? "";
 });
 // Applicant email lookup via auth-svc internal API. Fails startup outside Development when
-// AUTH_SERVICE_URL or INTERNAL_SERVICE_TOKEN is missing; there is no fallback recipient.
+// AUTH_SERVICE_URL or AUTH_INTERNAL_TOKEN_FOR_NOTIF is missing; there is no fallback recipient.
 builder.Services.AddAuthServiceClient(builder.Configuration, builder.Environment.IsDevelopment());
 builder.Services.AddHostedService<ApplicationEventsConsumer>();
 
@@ -167,7 +167,7 @@ if (builder.Environment.IsDevelopment()
     && !app.Services.GetRequiredService<AuthServiceOptions>().IsConfigured)
 {
     app.Logger.LogWarning(
-        "AUTH_SERVICE_URL or INTERNAL_SERVICE_TOKEN is not set. Applicant emails will be retried until they are configured.");
+        "AUTH_SERVICE_URL or AUTH_INTERNAL_TOKEN_FOR_NOTIF is not set. Applicant emails will be retried until they are configured.");
 }
 
 if (!jobEventsEnabled)

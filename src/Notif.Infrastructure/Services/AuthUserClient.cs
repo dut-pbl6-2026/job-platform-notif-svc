@@ -48,7 +48,7 @@ public sealed class AuthUserClient : IUserEmailLookup
     {
         if (!_options.IsConfigured)
         {
-            throw new UserEmailLookupUnavailableException("auth-svc is not configured (AUTH_SERVICE_URL / INTERNAL_SERVICE_TOKEN).");
+            throw new UserEmailLookupUnavailableException("auth-svc is not configured (AUTH_SERVICE_URL / AUTH_INTERNAL_TOKEN_FOR_NOTIF).");
         }
 
         for (var attempt = 1; ; attempt++)
@@ -62,7 +62,7 @@ public sealed class AuthUserClient : IUserEmailLookup
             if (outcome.Kind == AttemptKind.Rejected)
             {
                 _logger.LogError(
-                    "auth-svc rejected the internal service token (Status={StatusCode}). Check INTERNAL_SERVICE_TOKEN. UserId={UserId}.",
+                    "auth-svc rejected the internal service token (Status={StatusCode}). Check AUTH_INTERNAL_TOKEN_FOR_NOTIF. UserId={UserId}.",
                     (int)outcome.StatusCode, userId);
                 throw new UserEmailLookupUnavailableException(
                     $"auth-svc rejected the internal token (status {(int)outcome.StatusCode}).");

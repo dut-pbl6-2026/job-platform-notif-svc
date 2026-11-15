@@ -73,7 +73,7 @@ Not implemented: keyword subscriptions, multiple subscriptions per chat, `/list`
 
 ## Recipient resolution (applicant emails)
 
-`ApplicationEventsConsumer` resolves `application.status_changed` / `application.updated` to the applicant's email by calling auth-svc `GET /api/internal/users/{ApplicantId}/email` directly on the internal network (not via the gateway). Bearer auth with `INTERNAL_SERVICE_TOKEN`; response `{ userId, email }`.
+`ApplicationEventsConsumer` resolves `application.status_changed` / `application.updated` to the applicant's email by calling auth-svc `GET /api/internal/users/{ApplicantId}/email` directly on the internal network (not via the gateway). Bearer auth with `AUTH_INTERNAL_TOKEN_FOR_NOTIF`; response `{ userId, email }`.
 
 - Found: mail is sent to the returned address.
 - 404: warning with the user id only, `Skip`. Nothing is sent.
@@ -101,7 +101,7 @@ Not implemented: keyword subscriptions, multiple subscriptions per chat, `/list`
 
 **Always** read from `IConfiguration` / environment variables. Dev-only fallbacks in `appsettings.Development.json` only.
 
-- Required env vars: `DATABASE_URL_NOTIF`, `KAFKA_BOOTSTRAP_SERVERS`, `KAFKA_TOPIC_APPLICATION_EVENTS`, `KAFKA_GROUP_NOTIF`, `KAFKA_TOPIC_JOB_EVENTS`, `KAFKA_GROUP_JOB_NOTIF`, `NOTIF_JOB_EVENTS_ENABLED`, `SMTP_HOST`, `SMTP_PORT`, `SMTP_USER`, `SMTP_PASS`, `SMTP_FROM`, `NOTIF_DEFAULT_RECIPIENT` (job events only), `NOTIF_HISTORY_TOKEN`, `NOTIF_BASE_URL`, `AUTH_SERVICE_URL` (auth-svc base URL, required outside Development), `INTERNAL_SERVICE_TOKEN` (required outside Development, no default).
+- Required env vars: `DATABASE_URL_NOTIF`, `KAFKA_BOOTSTRAP_SERVERS`, `KAFKA_TOPIC_APPLICATION_EVENTS`, `KAFKA_GROUP_NOTIF`, `KAFKA_TOPIC_JOB_EVENTS`, `KAFKA_GROUP_JOB_NOTIF`, `NOTIF_JOB_EVENTS_ENABLED`, `SMTP_HOST`, `SMTP_PORT`, `SMTP_USER`, `SMTP_PASS`, `SMTP_FROM`, `NOTIF_DEFAULT_RECIPIENT` (job events only), `NOTIF_HISTORY_TOKEN`, `NOTIF_BASE_URL`, `AUTH_SERVICE_URL` (auth-svc base URL, required outside Development), `AUTH_INTERNAL_TOKEN_FOR_NOTIF` (required outside Development, no default).
 - Telegram (optional, PBL6-63): `TELEGRAM_BOT_TOKEN`, `TELEGRAM_WEBHOOK_SECRET`, `TELEGRAM_API_BASE_URL` — see the Telegram section.
 
 ## 2026 best practice (NFR `MAINT`)

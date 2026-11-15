@@ -3,7 +3,7 @@ using Microsoft.Extensions.Configuration;
 namespace Notif.Infrastructure.Services;
 
 /// <summary>
-/// auth-svc internal API settings (<c>AUTH_SERVICE_URL</c>, <c>INTERNAL_SERVICE_TOKEN</c>).
+/// auth-svc internal API settings (<c>AUTH_SERVICE_URL</c>, <c>AUTH_INTERNAL_TOKEN_FOR_NOTIF</c>).
 /// Values come only from configuration; the token has no default and is never logged.
 /// Outside Development both are required and a missing value fails startup.
 /// </summary>
@@ -16,14 +16,14 @@ public sealed record AuthServiceOptions(string BaseUrl, string InternalToken)
         ArgumentNullException.ThrowIfNull(configuration);
 
         var baseUrl = Usable(configuration["AUTH_SERVICE_URL"]);
-        var token = Usable(configuration["INTERNAL_SERVICE_TOKEN"]);
+        var token = Usable(configuration["AUTH_INTERNAL_TOKEN_FOR_NOTIF"]);
 
         if (baseUrl is null || token is null)
         {
             if (!isDevelopment)
             {
                 throw new InvalidOperationException(
-                    "AUTH_SERVICE_URL and INTERNAL_SERVICE_TOKEN are required outside Development. "
+                    "AUTH_SERVICE_URL and AUTH_INTERNAL_TOKEN_FOR_NOTIF are required outside Development. "
                     + "Recipient lookup cannot run without them.");
             }
 
