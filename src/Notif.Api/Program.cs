@@ -1,4 +1,5 @@
 using Microsoft.EntityFrameworkCore;
+using Notif.Api.Bootstrap;
 using Notif.Api.Endpoints;
 using Notif.Api.Observability;
 using Notif.Core.Interfaces;
@@ -47,6 +48,12 @@ if (IsUnusable(conn))
         throw new InvalidOperationException("Connection string not configured. Set DATABASE_URL_NOTIF env var or ConnectionStrings:NotifDb.");
     }
 }
+
+// Schema migration is a separate deploy step: `migrate` applies pending migrations and exits.
+// Checked before the token policy so the one-off job needs only the database settings.
+// The web host never migrates on startup.
+if (MigrateCommand.IsInvoked(args))
+    return await MigrateCommand.RunAsync(args, conn, Console.Out, Console.Error);
 
 // Notification history exposes recipient PII: the internal token is required outside Development.
 NotificationHistoryEndpoint.ValidateTokenPolicy(
@@ -170,23 +177,9 @@ if (!jobEventsEnabled)
         + "Enabling requires a recruiter recipient lookup and the job.updated previousStatus/rejectionReason contract.");
 }
 
-using (var scope = app.Services.CreateScope())
-{
-    var logger = scope.ServiceProvider.GetRequiredService<ILoggerFactory>().CreateLogger("Startup");
-    var db = scope.ServiceProvider.GetRequiredService<NotifDbContext>();
-    try
-    {
-        await db.Database.MigrateAsync();
-        logger.LogInformation("Notif DB migrated.");
-    }
-    catch (Exception ex)
-    {
-        logger.LogError(ex, "Notif DB migrate failed — shutting down");
-        throw;
-    }
-}
-
 app.Run();
+
+return 0;
 
 public partial class Program
 {
