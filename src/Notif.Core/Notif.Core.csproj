@@ -5,6 +5,6 @@
     <Nullable>enable</Nullable>
   </PropertyGroup>
   <ItemGroup>
-    <PackageReference Include="JobPlatform.SharedKernel" Version="0.2.0" />
+    <PackageReference Include="JobPlatform.SharedKernel" Version="0.3.1" />
   </ItemGroup>
 </Project>

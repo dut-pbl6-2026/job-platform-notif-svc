@@ -6,7 +6,7 @@
   </PropertyGroup>
   <ItemGroup>
     <ProjectReference Include="../Notif.Core/Notif.Core.csproj" />
-    <PackageReference Include="JobPlatform.SharedKernel" Version="0.2.0" />
+    <PackageReference Include="JobPlatform.SharedKernel" Version="0.3.1" />
   </ItemGroup>
   <ItemGroup>
     <PackageReference Include="Microsoft.EntityFrameworkCore" Version="10.0.4" />
