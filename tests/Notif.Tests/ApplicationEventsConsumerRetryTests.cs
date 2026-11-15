@@ -79,18 +79,16 @@ public class ApplicationEventsConsumerRetryTests
         var services = new ServiceCollection();
         services.AddDbContext<NotifDbContext>(o => o.UseInMemoryDatabase(dbName));
         services.AddSingleton<INotificationService>(sender);
+        services.AddSingleton<IUserEmailLookup>(new FakeUserEmailLookup
+        {
+            Users = { [ApplicantId] = "applicant@example.test" },
+        });
         var provider = services.BuildServiceProvider();
         var consumer = new TestableConsumer(Options.Create(new KafkaOptions()), provider);
         return (consumer, sender, provider);
     }
 
-    private static string SubmittedEnvelope(Guid applicationId)
-    {
-        var payload = new ApplicationSubmittedEvent(
-            applicationId, Guid.NewGuid(), "Backend Dev", Guid.NewGuid(), DateTime.UtcNow);
-        var envelope = EventEnvelope<ApplicationSubmittedEvent>.Create(ApplicationEventTypes.Submitted, payload);
-        return JsonSerializer.Serialize(envelope, KafkaJson.Options);
-    }
+    private static readonly Guid ApplicantId = Guid.Parse("6f1c2a3b-4d5e-4f60-8a71-92b3c4d5e6f7");
 
     [Fact]
     public void GroupId_DefaultsToApplicationConsumerGroup()
@@ -106,7 +104,7 @@ public class ApplicationEventsConsumerRetryTests
         var dbName = Guid.NewGuid().ToString();
         var (consumer, sender, provider) = Build(dbName);
         sender.FailFirst = 1;
-        var json = SubmittedEnvelope(Guid.NewGuid());
+        var json = StatusChangedEnvelope(Guid.NewGuid(), "accepted");
 
         var first = await consumer.HandleAsync(json);
         var second = await consumer.HandleAsync(json);
@@ -127,7 +125,7 @@ public class ApplicationEventsConsumerRetryTests
     {
         var dbName = Guid.NewGuid().ToString();
         var (consumer, sender, _) = Build(dbName);
-        var json = SubmittedEnvelope(Guid.NewGuid());
+        var json = StatusChangedEnvelope(Guid.NewGuid(), "accepted");
 
         var first = await consumer.HandleAsync(json);
         var second = await consumer.HandleAsync(json);
@@ -143,7 +141,7 @@ public class ApplicationEventsConsumerRetryTests
         var dbName = Guid.NewGuid().ToString();
         var (consumer, sender, _) = Build(dbName);
         var payload = new ApplicationStatusChangedEvent(
-            Guid.NewGuid(), Guid.NewGuid(), "Backend Dev", Guid.NewGuid(),
+            Guid.NewGuid(), Guid.NewGuid(), "Backend Dev", ApplicantId,
             "pending", "accepted", Guid.NewGuid(), DateTime.UtcNow);
         var json = JsonSerializer.Serialize(
             EventEnvelope<ApplicationStatusChangedEvent>.Create(ApplicationEventTypes.StatusChanged, payload),
@@ -233,7 +231,7 @@ public class ApplicationEventsConsumerRetryTests
         var dbName = Guid.NewGuid().ToString();
         var (consumer, sender, _) = Build(dbName);
         var payload = new ApplicationStatusChangedEvent(
-            Guid.NewGuid(), Guid.NewGuid(), "Backend Dev", Guid.NewGuid(),
+            Guid.NewGuid(), Guid.NewGuid(), "Backend Dev", ApplicantId,
             "pending", "accepted", Guid.NewGuid(), DateTime.UtcNow);
         var json = JsonSerializer.Serialize(
             EventEnvelope<ApplicationStatusChangedEvent>.Create("application.updated", payload),
@@ -270,7 +268,7 @@ public class ApplicationEventsConsumerRetryTests
     private static string StatusChangedEnvelope(Guid applicationId, string newStatus)
     {
         var payload = new ApplicationStatusChangedEvent(
-            applicationId, Guid.NewGuid(), "Backend Dev", Guid.NewGuid(),
+            applicationId, Guid.NewGuid(), "Backend Dev", ApplicantId,
             "pending", newStatus, Guid.NewGuid(), DateTime.UtcNow);
         return JsonSerializer.Serialize(
             EventEnvelope<ApplicationStatusChangedEvent>.Create(ApplicationEventTypes.StatusChanged, payload),

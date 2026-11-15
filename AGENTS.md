@@ -34,8 +34,8 @@ Dependency: `Api → Infrastructure → Core → SharedKernel` (`PackageReferenc
 ## SRS mapping (NOTIF-01)
 
 - `ApplicationEventsConsumer` — Consumes `application-events` topic (group `notif-svc`, the default for `KAFKA_GROUP_NOTIF`):
-  - `application.submitted` → email recruiter template (NOTIF-01-03).
-  - `application.status_changed` / `application.updated` → email applicant template (NOTIF-01-01).
+  - `application.submitted` → recruiter template (NOTIF-01-03) is currently skipped: the event has no recruiter user id (see Recipient resolution).
+  - `application.status_changed` / `application.updated` → applicant email (NOTIF-01-01), address from auth-svc by `ApplicantId`.
   - Unknown or poison messages: `MessageOutcome.Skip` (offset committed, no retry loop).
   - Idempotency: unique index on `(ApplicationId, EventType, IdempotencyKey)` in `notification_logs`; application notifications default the key to the status snapshot, while `JobEventsConsumer` uses the envelope event id. Concurrent delivery handled via Postgres `23505` unique-violation catch.
 - `JobEventsConsumer` — Consumes `job-events` topic (group `notif-svc-job`, the default for `KAFKA_GROUP_JOB_NOTIF`; **must stay distinct** from the application consumer's `notif-svc` group) for admin approval emails. **Gated by `NOTIF_JOB_EVENTS_ENABLED` (off by default)**: `JobUpdatedEvent` carries no recruiter address and no `previousStatus` transition yet, so enabling it in production needs the PBL6-35 recipient lookup plus the job-svc contract change. When enabled it only mails on a real transition (`Active` from another status = approved, `Rejected` from another status = rejected); an edit of an already-live job is silent. Missing `previousStatus`/`rejectionReason` are read from the raw envelope so the shared contract can grow without a package bump. Idempotency is per Kafka event (envelope `eventId`), so redelivery is deduped but a later `Rejected`/`Active` transition for the same job still emails.
@@ -69,11 +69,17 @@ curl -X POST "<TELEGRAM_API_BASE_URL>/bot<TELEGRAM_BOT_TOKEN>/setWebhook" \
 
 Not implemented: keyword subscriptions, multiple subscriptions per chat, `/list`, `/language`, Vietnamese messages, rate-limit (429) handling, and automatic job alerts.
 
-## Recipient resolution (STUB — follow-up required)
+## Recipient resolution (applicant emails)
 
-`ResolveRecipient` in `ApplicationEventsConsumer` currently sends all emails to a configured fallback address (`NOTIF_DEFAULT_RECIPIENT` → `SMTP_FROM`). Real recipient lookup from auth/profile service is a follow-up task (PBL6-35 acceptance criterion). **Do not remove the `[STUB]` warning log until real lookup is implemented.**
+`ApplicationEventsConsumer` resolves `application.status_changed` / `application.updated` to the applicant's email by calling auth-svc `GET /api/internal/users/{ApplicantId}/email` directly on the internal network (not via the gateway). Bearer auth with `INTERNAL_SERVICE_TOKEN`; response `{ userId, email }`.
 
-The same limitation applies to `JobEventsConsumer`, which is why it stays behind `NOTIF_JOB_EVENTS_ENABLED`: enabling it without a real lookup mails the fallback inbox. When enabled, a missing recipient fails startup (fail fast) instead of returning `Retry` forever, and a runtime miss returns `Skip` so the partition never stalls.
+- Found: mail is sent to the returned address.
+- 404: warning with the user id only, `Skip`. Nothing is sent.
+- Unavailable (transport, timeout, 5xx, 408, 429, bad body): retried in-process with bounded backoff (3 attempts), then `Retry` (Kafka redelivery). A 401/403 is not retried; it logs an error and returns `Retry`.
+- There is no fallback address. `NOTIF_DEFAULT_RECIPIENT` is not used for applicant mail.
+- `application.submitted` is **skipped** with a warning: the recruiter email needs a recruiter user id, which the event does not carry. Re-enable once the contract carries it.
+
+`JobEventsConsumer` (gated by `NOTIF_JOB_EVENTS_ENABLED`) still uses `NOTIF_DEFAULT_RECIPIENT` / `SMTP_FROM`. It stays off until its recruiter lookup exists.
 
 ## Email templates
 
@@ -93,7 +99,7 @@ The same limitation applies to `JobEventsConsumer`, which is why it stays behind
 
 **Always** read from `IConfiguration` / environment variables. Dev-only fallbacks in `appsettings.Development.json` only.
 
-- Required env vars: `DATABASE_URL_NOTIF`, `KAFKA_BOOTSTRAP_SERVERS`, `KAFKA_TOPIC_APPLICATION_EVENTS`, `KAFKA_GROUP_NOTIF`, `KAFKA_TOPIC_JOB_EVENTS`, `KAFKA_GROUP_JOB_NOTIF`, `NOTIF_JOB_EVENTS_ENABLED`, `SMTP_HOST`, `SMTP_PORT`, `SMTP_USER`, `SMTP_PASS`, `SMTP_FROM`, `NOTIF_DEFAULT_RECIPIENT`, `NOTIF_HISTORY_TOKEN`, `NOTIF_BASE_URL`.
+- Required env vars: `DATABASE_URL_NOTIF`, `KAFKA_BOOTSTRAP_SERVERS`, `KAFKA_TOPIC_APPLICATION_EVENTS`, `KAFKA_GROUP_NOTIF`, `KAFKA_TOPIC_JOB_EVENTS`, `KAFKA_GROUP_JOB_NOTIF`, `NOTIF_JOB_EVENTS_ENABLED`, `SMTP_HOST`, `SMTP_PORT`, `SMTP_USER`, `SMTP_PASS`, `SMTP_FROM`, `NOTIF_DEFAULT_RECIPIENT` (job events only), `NOTIF_HISTORY_TOKEN`, `NOTIF_BASE_URL`, `AUTH_SERVICE_URL` (auth-svc base URL, required outside Development), `INTERNAL_SERVICE_TOKEN` (required outside Development, no default).
 - Telegram (optional, PBL6-63): `TELEGRAM_BOT_TOKEN`, `TELEGRAM_WEBHOOK_SECRET`, `TELEGRAM_API_BASE_URL` — see the Telegram section.
 
 ## 2026 best practice (NFR `MAINT`)
