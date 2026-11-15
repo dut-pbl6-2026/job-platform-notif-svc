@@ -42,6 +42,33 @@ Dependency: `Api → Infrastructure → Core → SharedKernel` (`PackageReferenc
 - `GET /api/notifications/history` (NOTIF-01-06) — Paginated delivery log (PII). Requires `X-Internal-Token == NOTIF_HISTORY_TOKEN` when configured.
 - `GET /health` — `{"status":"ok","service":"notification"}`.
 
+## Telegram job alert bot (PBL6-63, SRS TELE-01)
+
+- `POST /api/notifications/telegram/webhook` — Telegram webhook. Requires header `X-Telegram-Bot-Api-Secret-Token == TELEGRAM_WEBHOOK_SECRET` (constant-time compare). Missing or wrong secret, or the bot not configured → `401`, nothing processed. Any authenticated update → `200`.
+- Commands: `/start`, `/help` (welcome and command list), `/subscribe`, `/unsubscribe`. In groups, `/cmd@BotName` is accepted. Other `/…` commands get the help text; plain text is ignored.
+- Subscriptions: table `telegram_subscriptions` (`ChatId` bigint, unique; `IsActive`). Unsubscribe deactivates the row; re-subscribe reactivates it.
+- `TelegramBroadcaster.BroadcastAsync(text)` sends plain text to every active chat and returns `{Sent, Failed}`. A failed chat is counted and skipped. Nothing calls it yet; wiring it to job events is a follow-up.
+- Bot API calls go through `TelegramBotClient` (plain `HttpClient`, not `IHttpClientFactory`, so the token-bearing URL is not logged).
+- Gateway: `/api/notifications/**` requires JWT, and Telegram cannot send one. The gateway needs an anonymous route for `/api/notifications/telegram/webhook` (follow-up in `job-platform-gateway`).
+
+Config (all from env, never committed):
+
+| Key | Required | Notes |
+|-----|----------|-------|
+| `TELEGRAM_BOT_TOKEN` | to enable | Token from BotFather. Unset → bot off. |
+| `TELEGRAM_WEBHOOK_SECRET` | with token | 1–256 chars of `A-Z a-z 0-9 _ -`. Startup fails if missing. |
+| `TELEGRAM_API_BASE_URL` | with token | Absolute URL, e.g. `https://api.telegram.org`. Startup fails if missing. |
+
+Register the webhook once (placeholders, do not commit real values):
+
+```bash
+curl -X POST "<TELEGRAM_API_BASE_URL>/bot<TELEGRAM_BOT_TOKEN>/setWebhook" \
+  -d "url=<PUBLIC_BASE_URL>/api/notifications/telegram/webhook" \
+  -d "secret_token=<TELEGRAM_WEBHOOK_SECRET>"
+```
+
+Not implemented: keyword subscriptions, multiple subscriptions per chat, `/list`, `/language`, Vietnamese messages, rate-limit (429) handling, and automatic job alerts.
+
 ## Recipient resolution (STUB — follow-up required)
 
 `ResolveRecipient` in `ApplicationEventsConsumer` currently sends all emails to a configured fallback address (`NOTIF_DEFAULT_RECIPIENT` → `SMTP_FROM`). Real recipient lookup from auth/profile service is a follow-up task (PBL6-35 acceptance criterion). **Do not remove the `[STUB]` warning log until real lookup is implemented.**
@@ -67,6 +94,7 @@ The same limitation applies to `JobEventsConsumer`, which is why it stays behind
 **Always** read from `IConfiguration` / environment variables. Dev-only fallbacks in `appsettings.Development.json` only.
 
 - Required env vars: `DATABASE_URL_NOTIF`, `KAFKA_BOOTSTRAP_SERVERS`, `KAFKA_TOPIC_APPLICATION_EVENTS`, `KAFKA_GROUP_NOTIF`, `KAFKA_TOPIC_JOB_EVENTS`, `KAFKA_GROUP_JOB_NOTIF`, `NOTIF_JOB_EVENTS_ENABLED`, `SMTP_HOST`, `SMTP_PORT`, `SMTP_USER`, `SMTP_PASS`, `SMTP_FROM`, `NOTIF_DEFAULT_RECIPIENT`, `NOTIF_HISTORY_TOKEN`, `NOTIF_BASE_URL`.
+- Telegram (optional, PBL6-63): `TELEGRAM_BOT_TOKEN`, `TELEGRAM_WEBHOOK_SECRET`, `TELEGRAM_API_BASE_URL` — see the Telegram section.
 
 ## 2026 best practice (NFR `MAINT`)
 

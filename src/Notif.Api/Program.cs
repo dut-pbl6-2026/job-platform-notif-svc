@@ -99,6 +99,16 @@ if (jobEventsEnabled)
     builder.Services.AddHostedService<JobEventsConsumer>();
 }
 
+// PBL6-63: Telegram job alert bot. Off unless TELEGRAM_BOT_TOKEN is set; a partial config fails startup.
+var telegramOptions = TelegramOptions.Load(builder.Configuration);
+builder.Services.AddSingleton(telegramOptions);
+builder.Services.AddSingleton<ITelegramSender>(sp => new TelegramBotClient(
+    new HttpClient { Timeout = TimeSpan.FromSeconds(10) },
+    sp.GetRequiredService<TelegramOptions>(),
+    sp.GetRequiredService<ILogger<TelegramBotClient>>()));
+builder.Services.AddScoped<TelegramUpdateHandler>();
+builder.Services.AddScoped<TelegramBroadcaster>();
+
 builder.Services.AddProblemDetails();
 builder.Services.AddEndpointsApiExplorer();
 builder.Services.AddSwaggerGen(o =>
@@ -142,6 +152,24 @@ app.MapGet("/api/notifications/history", async (
         page, size, db, ct))
 .WithTags("Notifications")
 .WithSummary("Paginated email delivery history (SRS NOTIF-01-06)");
+
+// PBL6-63 / TELE-01-05: Telegram webhook. Authenticated by the webhook secret header, not by JWT.
+app.MapPost("/api/notifications/telegram/webhook", async (
+    HttpContext ctx,
+    TelegramUpdateHandler handler,
+    CancellationToken ct) =>
+{
+    using var reader = new StreamReader(ctx.Request.Body);
+    var body = await reader.ReadToEndAsync(ct);
+    return await TelegramWebhookEndpoint.HandleAsync(
+        ctx.Request.Headers[TelegramWebhookEndpoint.SecretHeader].FirstOrDefault(),
+        telegramOptions.IsEnabled ? telegramOptions.WebhookSecret : null,
+        body,
+        handler,
+        ct);
+})
+.WithTags("Notifications")
+.WithSummary("Telegram bot webhook (TELE-01-05). Requires the X-Telegram-Bot-Api-Secret-Token header.");
 
 // NOTIF-01-06 rows carry recipient PII — loud signal when the internal token is off.
 if (string.IsNullOrWhiteSpace(app.Configuration["NOTIF_HISTORY_TOKEN"]))

@@ -89,6 +89,32 @@ namespace Notif.Infrastructure.Migrations
 
                     b.ToTable("notification_logs", (string)null);
                 });
+
+            modelBuilder.Entity("Notif.Core.Entities.TelegramSubscription", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("uuid");
+
+                    b.Property<long>("ChatId")
+                        .HasColumnType("bigint");
+
+                    b.Property<DateTime>("CreatedAt")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<bool>("IsActive")
+                        .HasColumnType("boolean");
+
+                    b.Property<DateTime>("UpdatedAt")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("ChatId")
+                        .IsUnique();
+
+                    b.ToTable("telegram_subscriptions", (string)null);
+                });
 #pragma warning restore 612, 618
         }
     }
