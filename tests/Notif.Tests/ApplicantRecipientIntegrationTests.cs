@@ -29,7 +29,7 @@ public class ApplicantRecipientIntegrationTests
         builder.Configuration.AddInMemoryCollection(new Dictionary<string, string?>
         {
             ["AUTH_SERVICE_URL"] = "http://auth-svc:5001",
-            ["INTERNAL_SERVICE_TOKEN"] = "internal-test-token",
+            ["AUTH_INTERNAL_TOKEN_FOR_NOTIF"] = "internal-test-token",
         });
 
         var lookup = new FakeUserEmailLookup();

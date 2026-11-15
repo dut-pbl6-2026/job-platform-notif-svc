@@ -4,7 +4,7 @@ using Xunit;
 
 namespace Notif.Tests;
 
-/// <summary>Unit: AUTH_SERVICE_URL / INTERNAL_SERVICE_TOKEN startup policy.</summary>
+/// <summary>Unit: AUTH_SERVICE_URL / AUTH_INTERNAL_TOKEN_FOR_NOTIF startup policy.</summary>
 public class AuthServiceOptionsTests
 {
     private static IConfiguration Config(params (string Key, string? Value)[] values)
@@ -19,10 +19,10 @@ public class AuthServiceOptionsTests
     [InlineData("", "token")]
     [InlineData("http://auth-svc:5001", "  ")]
     [InlineData("<set via infisical>", "token")]
-    [InlineData("http://auth-svc:5001", "${INTERNAL_SERVICE_TOKEN}")]
+    [InlineData("http://auth-svc:5001", "${AUTH_INTERNAL_TOKEN_FOR_NOTIF}")]
     public void Load_OutsideDevelopment_WhenEitherValueMissing_Throws(string? url, string? token)
     {
-        var config = Config(("AUTH_SERVICE_URL", url), ("INTERNAL_SERVICE_TOKEN", token));
+        var config = Config(("AUTH_SERVICE_URL", url), ("AUTH_INTERNAL_TOKEN_FOR_NOTIF", token));
 
         Assert.Throws<InvalidOperationException>(() => AuthServiceOptions.Load(config, isDevelopment: false));
     }
@@ -34,16 +34,25 @@ public class AuthServiceOptionsTests
     public void Load_InDevelopment_WhenMissing_ReturnsUnconfigured(string? url, string? token)
     {
         var options = AuthServiceOptions.Load(
-            Config(("AUTH_SERVICE_URL", url), ("INTERNAL_SERVICE_TOKEN", token)), isDevelopment: true);
+            Config(("AUTH_SERVICE_URL", url), ("AUTH_INTERNAL_TOKEN_FOR_NOTIF", token)), isDevelopment: true);
 
         Assert.False(options.IsConfigured);
+    }
+
+    [Fact]
+    public void Load_OutsideDevelopment_IgnoresRetiredSharedToken_AndThrows()
+    {
+        // The pre-split INTERNAL_SERVICE_TOKEN must not configure the auth-svc client any more.
+        var config = Config(("AUTH_SERVICE_URL", "http://auth-svc:5001"), ("INTERNAL_SERVICE_TOKEN", "token"));
+
+        Assert.Throws<InvalidOperationException>(() => AuthServiceOptions.Load(config, isDevelopment: false));
     }
 
     [Fact]
     public void Load_WithBothValues_TrimsTrailingSlash()
     {
         var options = AuthServiceOptions.Load(
-            Config(("AUTH_SERVICE_URL", "http://auth-svc:5001/"), ("INTERNAL_SERVICE_TOKEN", " token ")),
+            Config(("AUTH_SERVICE_URL", "http://auth-svc:5001/"), ("AUTH_INTERNAL_TOKEN_FOR_NOTIF", " token ")),
             isDevelopment: false);
 
         Assert.True(options.IsConfigured);
@@ -57,7 +66,7 @@ public class AuthServiceOptionsTests
     [InlineData("/relative/path")]
     public void Load_WithNonHttpUrl_ThrowsEvenInDevelopment(string url)
     {
-        var config = Config(("AUTH_SERVICE_URL", url), ("INTERNAL_SERVICE_TOKEN", "token"));
+        var config = Config(("AUTH_SERVICE_URL", url), ("AUTH_INTERNAL_TOKEN_FOR_NOTIF", "token"));
 
         Assert.Throws<InvalidOperationException>(() => AuthServiceOptions.Load(config, isDevelopment: true));
     }
