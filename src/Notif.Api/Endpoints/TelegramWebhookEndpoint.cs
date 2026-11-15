@@ -1,6 +1,4 @@
-using System.Security.Cryptography;
-using System.Text;
-using Microsoft.AspNetCore.Http;
+using Notif.Api.Security;
 using Notif.Infrastructure.Services;
 
 namespace Notif.Api.Endpoints;
@@ -25,25 +23,12 @@ public static class TelegramWebhookEndpoint
     {
         ArgumentNullException.ThrowIfNull(handler);
 
-        if (!SecretMatches(providedSecret, expectedSecret))
+        if (!SecretComparison.Matches(providedSecret, expectedSecret))
         {
             return Results.Unauthorized();
         }
 
         await handler.HandleAsync(body, ct);
         return Results.Ok();
-    }
-
-    /// <summary>Constant-time comparison. An empty or missing expected secret never matches.</summary>
-    public static bool SecretMatches(string? provided, string? expected)
-    {
-        if (string.IsNullOrEmpty(expected) || string.IsNullOrEmpty(provided))
-        {
-            return false;
-        }
-
-        return CryptographicOperations.FixedTimeEquals(
-            Encoding.UTF8.GetBytes(provided),
-            Encoding.UTF8.GetBytes(expected));
     }
 }
