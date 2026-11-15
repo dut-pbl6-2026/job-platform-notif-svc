@@ -48,6 +48,11 @@ if (IsUnusable(conn))
     }
 }
 
+// Notification history exposes recipient PII: the internal token is required outside Development.
+NotificationHistoryEndpoint.ValidateTokenPolicy(
+    builder.Configuration[NotificationHistoryEndpoint.TokenSetting],
+    builder.Environment.IsDevelopment());
+
 builder.Services.AddDbContext<NotifDbContext>(o => o.UseNpgsql(conn));
 builder.Services.AddServiceHealthChecks<NotifDbContext>(builder.Configuration);
 
@@ -140,42 +145,12 @@ if (app.Configuration.GetValue("METRICS_ENABLED", !app.Environment.IsProduction(
 app.MapGet("/", () => Results.Ok(new { service = "notification", version = "0.1.0" }))
     .ExcludeFromDescription();
 
-app.MapGet("/api/notifications/history", async (
-    HttpContext ctx,
-    NotifDbContext db,
-    CancellationToken ct,
-    int page = 1,
-    int size = 20) =>
-    await NotificationHistoryEndpoint.HandleAsync(
-        ctx.Request.Headers[NotificationHistoryEndpoint.TokenHeader].FirstOrDefault(),
-        app.Configuration["NOTIF_HISTORY_TOKEN"],
-        page, size, db, ct))
-.WithTags("Notifications")
-.WithSummary("Paginated email delivery history (SRS NOTIF-01-06)");
+app.MapNotificationEndpoints(allowHistoryWithoutToken: app.Environment.IsDevelopment());
 
-// PBL6-63 / TELE-01-05: Telegram webhook. Authenticated by the webhook secret header, not by JWT.
-app.MapPost("/api/notifications/telegram/webhook", async (
-    HttpContext ctx,
-    TelegramUpdateHandler handler,
-    CancellationToken ct) =>
-{
-    using var reader = new StreamReader(ctx.Request.Body);
-    var body = await reader.ReadToEndAsync(ct);
-    return await TelegramWebhookEndpoint.HandleAsync(
-        ctx.Request.Headers[TelegramWebhookEndpoint.SecretHeader].FirstOrDefault(),
-        telegramOptions.IsEnabled ? telegramOptions.WebhookSecret : null,
-        body,
-        handler,
-        ct);
-})
-.WithTags("Notifications")
-.WithSummary("Telegram bot webhook (TELE-01-05). Requires the X-Telegram-Bot-Api-Secret-Token header.");
-
-// NOTIF-01-06 rows carry recipient PII — loud signal when the internal token is off.
-if (string.IsNullOrWhiteSpace(app.Configuration["NOTIF_HISTORY_TOKEN"]))
+if (app.Environment.IsDevelopment() && string.IsNullOrWhiteSpace(app.Configuration[NotificationHistoryEndpoint.TokenSetting]))
 {
     app.Logger.LogWarning(
-        "NOTIF_HISTORY_TOKEN is not set. Notification history accepts requests without an internal token — restrict network access in non-dev environments.");
+        "NOTIF_HISTORY_TOKEN is not set. Notification history is open because the environment is Development.");
 }
 
 if (!jobEventsEnabled)

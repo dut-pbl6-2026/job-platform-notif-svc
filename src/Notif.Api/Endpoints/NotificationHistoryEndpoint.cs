@@ -1,22 +1,52 @@
 using Microsoft.EntityFrameworkCore;
+using Notif.Api.Security;
 using Notif.Infrastructure.Data;
 
 namespace Notif.Api.Endpoints;
 
 /// <summary>
 /// Paginated notification delivery history (SRS NOTIF-01-06).
-/// Rows contain recipient PII, so the endpoint requires an internal token
-/// (<c>X-Internal-Token</c> == <c>NOTIF_HISTORY_TOKEN</c>) when configured —
-/// same pattern as search-svc index endpoints (<c>SEARCH_INDEX_TOKEN</c>).
+/// Rows contain recipient PII, so the endpoint requires the internal token
+/// (<c>X-Internal-Token</c> == <c>NOTIF_HISTORY_TOKEN</c>). The token is mandatory outside
+/// Development (startup fails without it). Anonymous access exists only as an explicit Development
+/// opt-in, passed in as <c>allowWithoutToken</c>.
 /// Kept as a static handler (not an inline lambda) so it is unit-testable.
 /// </summary>
 public static class NotificationHistoryEndpoint
 {
     public const string TokenHeader = "X-Internal-Token";
 
+    public const string TokenSetting = "NOTIF_HISTORY_TOKEN";
+
+    /// <summary>Fails startup when the history token is missing outside Development.</summary>
+    public static void ValidateTokenPolicy(string? expectedToken, bool isDevelopment)
+    {
+        if (string.IsNullOrWhiteSpace(expectedToken) && !isDevelopment)
+        {
+            throw new InvalidOperationException(
+                $"{TokenSetting} is required outside Development: notification history contains recipient PII. "
+                + "Refusing to start.");
+        }
+    }
+
+    /// <summary>
+    /// Token gate. A configured token must match (constant-time). With no token configured the
+    /// request is allowed only when <paramref name="allowWithoutToken"/> is set (Development opt-in).
+    /// </summary>
+    public static bool IsAuthorized(string? providedToken, string? expectedToken, bool allowWithoutToken)
+    {
+        if (string.IsNullOrWhiteSpace(expectedToken))
+        {
+            return allowWithoutToken;
+        }
+
+        return SecretComparison.Matches(providedToken, expectedToken);
+    }
+
     public static async Task<IResult> HandleAsync(
         string? providedToken,
         string? expectedToken,
+        bool allowWithoutToken,
         int page,
         int size,
         NotifDbContext db,
@@ -24,7 +54,7 @@ public static class NotificationHistoryEndpoint
     {
         ArgumentNullException.ThrowIfNull(db);
 
-        if (!string.IsNullOrWhiteSpace(expectedToken) && !TokenEquals(providedToken, expectedToken))
+        if (!IsAuthorized(providedToken, expectedToken, allowWithoutToken))
         {
             return Results.Unauthorized();
         }
@@ -40,21 +70,5 @@ public static class NotificationHistoryEndpoint
             .Select(e => new { e.Id, e.RecipientEmail, e.Subject, e.TemplateName, e.Status, e.SentAt, e.CreatedAt })
             .ToListAsync(ct);
         return Results.Ok(new { items, total, page, size });
-    }
-
-    private static bool TokenEquals(string? provided, string expected)
-    {
-        if (string.IsNullOrEmpty(provided) || provided.Length != expected.Length)
-        {
-            return false;
-        }
-
-        var diff = 0;
-        for (var i = 0; i < expected.Length; i++)
-        {
-            diff |= provided[i] ^ expected[i];
-        }
-
-        return diff == 0;
     }
 }

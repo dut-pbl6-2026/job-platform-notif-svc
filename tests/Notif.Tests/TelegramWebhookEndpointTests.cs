@@ -7,37 +7,10 @@ using Xunit;
 
 namespace Notif.Tests;
 
-/// <summary>PBL6-63: webhook secret validation (fail closed, constant-time compare).</summary>
+/// <summary>PBL6-63: webhook request handling and secret gate (secret comparison itself is in SecretComparisonTests).</summary>
 public class TelegramWebhookEndpointTests
 {
     private const string Secret = "whsec_test-Value_123";
-
-    [Fact]
-    public void SecretMatches_WhenExpectedIsNull_ReturnsFalse()
-        => Assert.False(TelegramWebhookEndpoint.SecretMatches(Secret, null));
-
-    [Fact]
-    public void SecretMatches_WhenExpectedIsEmpty_ReturnsFalseEvenForEmptyProvided()
-    {
-        Assert.False(TelegramWebhookEndpoint.SecretMatches("", ""));
-        Assert.False(TelegramWebhookEndpoint.SecretMatches(null, ""));
-    }
-
-    [Fact]
-    public void SecretMatches_WhenProvidedIsMissing_ReturnsFalse()
-        => Assert.False(TelegramWebhookEndpoint.SecretMatches(null, Secret));
-
-    [Fact]
-    public void SecretMatches_WhenValueDiffers_ReturnsFalse()
-    {
-        Assert.False(TelegramWebhookEndpoint.SecretMatches("whsec_test-Value_124", Secret));
-        Assert.False(TelegramWebhookEndpoint.SecretMatches("whsec_test-Value_12", Secret));
-        Assert.False(TelegramWebhookEndpoint.SecretMatches(Secret + "x", Secret));
-    }
-
-    [Fact]
-    public void SecretMatches_WhenValueEqual_ReturnsTrue()
-        => Assert.True(TelegramWebhookEndpoint.SecretMatches(Secret, Secret));
 
     [Fact]
     public async Task HandleAsync_WhenSecretWrong_Returns401AndDoesNotProcess()

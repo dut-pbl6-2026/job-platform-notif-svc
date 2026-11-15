@@ -9,7 +9,8 @@ using Xunit;
 namespace Notif.Tests;
 
 /// <summary>
-/// History endpoint contract: internal-token gate (F-2) and pagination defaults.
+/// Unit: history handler auth outcome and pagination defaults. Route wiring and the HTTP contract
+/// are covered in NotificationApiIntegrationTests.
 /// </summary>
 public class NotificationHistoryEndpointTests
 {
@@ -19,18 +20,40 @@ public class NotificationHistoryEndpointTests
         using var db = BuildDb();
         await SeedAsync(db);
 
-        var result = await NotificationHistoryEndpoint.HandleAsync("wrong", "secret", 1, 20, db);
+        var result = await NotificationHistoryEndpoint.HandleAsync("wrong", "secret", false, 1, 20, db);
 
         Assert.Equal(401, ((IStatusCodeHttpResult)result).StatusCode);
     }
 
     [Fact]
-    public async Task HandleAsync_WhenTokenDisabled_ReturnsOk()
+    public async Task HandleAsync_WhenTokenConfiguredButHeaderMissing_Returns401()
     {
         using var db = BuildDb();
         await SeedAsync(db);
 
-        var result = await NotificationHistoryEndpoint.HandleAsync(null, "", 1, 20, db);
+        var result = await NotificationHistoryEndpoint.HandleAsync(null, "secret", true, 1, 20, db);
+
+        Assert.Equal(401, ((IStatusCodeHttpResult)result).StatusCode);
+    }
+
+    [Fact]
+    public async Task HandleAsync_WhenTokenNotConfiguredAndNoDevelopmentOptIn_Returns401()
+    {
+        using var db = BuildDb();
+        await SeedAsync(db);
+
+        var result = await NotificationHistoryEndpoint.HandleAsync(null, "", false, 1, 20, db);
+
+        Assert.Equal(401, ((IStatusCodeHttpResult)result).StatusCode);
+    }
+
+    [Fact]
+    public async Task HandleAsync_WhenTokenNotConfiguredWithDevelopmentOptIn_ReturnsOk()
+    {
+        using var db = BuildDb();
+        await SeedAsync(db);
+
+        var result = await NotificationHistoryEndpoint.HandleAsync(null, "", true, 1, 20, db);
 
         Assert.Equal(200, ((IStatusCodeHttpResult)result).StatusCode);
         using var doc = JsonDocument.Parse(JsonSerializer.Serialize(((IValueHttpResult)result).Value));
@@ -43,7 +66,7 @@ public class NotificationHistoryEndpointTests
         using var db = BuildDb();
         await SeedAsync(db);
 
-        var result = await NotificationHistoryEndpoint.HandleAsync("secret", "secret", 1, 20, db);
+        var result = await NotificationHistoryEndpoint.HandleAsync("secret", "secret", false, 1, 20, db);
 
         Assert.Equal(200, ((IStatusCodeHttpResult)result).StatusCode);
     }
@@ -54,7 +77,7 @@ public class NotificationHistoryEndpointTests
         using var db = BuildDb();
         await SeedAsync(db);
 
-        var result = await NotificationHistoryEndpoint.HandleAsync(null, "", 0, 500, db);
+        var result = await NotificationHistoryEndpoint.HandleAsync("secret", "secret", false, 0, 500, db);
 
         using var doc = JsonDocument.Parse(JsonSerializer.Serialize(((IValueHttpResult)result).Value));
         Assert.Equal(1, doc.RootElement.GetProperty("page").GetInt32());
