@@ -29,6 +29,8 @@ tests/Notif.Tests        → xunit (ApplicationEventsConsumerRetryTests, EmailTe
 NotifService.sln         → mise run build/test
 ```
 
+Schema migration is a separate deploy step: `dotnet Notif.Api.dll migrate` (`Bootstrap/MigrateCommand.cs`, compose service `notif-migrate`). The web host never migrates on startup.
+
 Dependency: `Api → Infrastructure → Core → SharedKernel` (`PackageReference JobPlatform.SharedKernel 0.2.0` via `local-feed` + `nuget.config`, never `ProjectReference` per `master-plan.md:132`). `MAINT-01` clean arch.
 
 ## SRS mapping (NOTIF-01)
