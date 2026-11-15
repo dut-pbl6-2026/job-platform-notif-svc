@@ -83,6 +83,9 @@ builder.Services.Configure<KafkaOptions>(o =>
     o.SslCaLocation = builder.Configuration["KAFKA_SSL_CA_LOCATION"]
         ?? builder.Configuration["Kafka:SslCaLocation"] ?? "";
 });
+// Applicant email lookup via auth-svc internal API. Fails startup outside Development when
+// AUTH_SERVICE_URL or INTERNAL_SERVICE_TOKEN is missing; there is no fallback recipient.
+builder.Services.AddAuthServiceClient(builder.Configuration, builder.Environment.IsDevelopment());
 builder.Services.AddHostedService<ApplicationEventsConsumer>();
 
 // feat(admin) Slice 5: job approval/rejection emails to recruiters.
@@ -151,6 +154,13 @@ if (app.Environment.IsDevelopment() && string.IsNullOrWhiteSpace(app.Configurati
 {
     app.Logger.LogWarning(
         "NOTIF_HISTORY_TOKEN is not set. Notification history is open because the environment is Development.");
+}
+
+if (builder.Environment.IsDevelopment()
+    && !app.Services.GetRequiredService<AuthServiceOptions>().IsConfigured)
+{
+    app.Logger.LogWarning(
+        "AUTH_SERVICE_URL or INTERNAL_SERVICE_TOKEN is not set. Applicant emails will be retried until they are configured.");
 }
 
 if (!jobEventsEnabled)

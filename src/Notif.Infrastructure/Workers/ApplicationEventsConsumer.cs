@@ -85,13 +85,14 @@ public class ApplicationEventsConsumer : KafkaConsumerService
             return MessageOutcome.Skip;
         }
 
-        var baseUrl = _configuration["NOTIF_BASE_URL"] ?? "";
-        var (subject, html, text) = EmailTemplates.SubmittedToRecruiter(
-            payload.JobTitle, payload.ApplicationId, payload.ApplicantId, payload.JobId, baseUrl);
-
-        return await SendAndLogAsync(
-            envelope.EventId, payload.ApplicationId, ApplicationEventTypes.Submitted, null,
-            subject, html, text, EmailTemplates.ApplicationSubmitted, "recruiter", ct);
+        // The recruiter email needs the recruiter's user id, and application.submitted does not carry it
+        // (ApplicantId is the candidate, not the recipient). Sending to the applicant would be wrong and
+        // there is no fallback address, so the message is skipped until the contract carries the recruiter id.
+        _logger.LogWarning(
+            "Recruiter notification skipped for application {ApplicationId} on job {JobId}: "
+            + "application.submitted carries no recruiter user id to resolve.",
+            payload.ApplicationId, payload.JobId);
+        return MessageOutcome.Skip;
     }
 
     private async Task<MessageOutcome> SendStatusChangedAsync(
@@ -105,11 +106,41 @@ public class ApplicationEventsConsumer : KafkaConsumerService
             return MessageOutcome.Skip;
         }
 
+        if (payload.ApplicantId == Guid.Empty)
+        {
+            _logger.LogWarning("Kafka poison message on {Topic}: application.status_changed with empty ApplicantId. Skipping.", Topic);
+            return MessageOutcome.Skip;
+        }
+
+        string? recipient;
+        try
+        {
+            using var lookupScope = _services.CreateScope();
+            var lookup = lookupScope.ServiceProvider.GetRequiredService<IUserEmailLookup>();
+            recipient = await lookup.FindEmailAsync(payload.ApplicantId, ct);
+        }
+        catch (UserEmailLookupUnavailableException ex)
+        {
+            _logger.LogWarning(
+                "Applicant email lookup unavailable. ApplicationId={ApplicationId} ApplicantId={ApplicantId}. Will retry. Reason={Reason}",
+                payload.ApplicationId, payload.ApplicantId, ex.Message);
+            return MessageOutcome.Retry;
+        }
+
+        if (string.IsNullOrWhiteSpace(recipient))
+        {
+            // Permanent: auth-svc does not know this user. Retrying would never succeed, and no other address is used.
+            _logger.LogWarning(
+                "Applicant {ApplicantId} not found in auth-svc. Notification for application {ApplicationId} skipped.",
+                payload.ApplicantId, payload.ApplicationId);
+            return MessageOutcome.Skip;
+        }
+
         var (subject, html, text) = EmailTemplates.StatusChangedToApplicant(payload.JobTitle, payload.NewStatus);
 
         return await SendAndLogAsync(
             envelope.EventId, payload.ApplicationId, ApplicationEventTypes.StatusChanged, payload.NewStatus,
-            subject, html, text, EmailTemplates.ApplicationStatusChanged, "applicant", ct);
+            recipient, subject, html, text, EmailTemplates.ApplicationStatusChanged, ct);
     }
 
     private async Task<MessageOutcome> SendAndLogAsync(
@@ -117,36 +148,20 @@ public class ApplicationEventsConsumer : KafkaConsumerService
         Guid applicationId,
         string eventType,
         string? statusSnapshot,
+        string recipientEmail,
         string subject,
         string html,
         string text,
         string template,
-        string recipientKind,
         CancellationToken ct)
     {
         using var scope = _services.CreateScope();
         var db = scope.ServiceProvider.GetRequiredService<NotifDbContext>();
         var sender = scope.ServiceProvider.GetRequiredService<INotificationService>();
-        var recipient = ResolveRecipient(recipientKind);
 
         return await NotificationDelivery.SendAndLogAsync(
             db, sender, _logger, eventId, applicationId, eventType, statusSnapshot,
-            recipient, subject, html, text, template, ct);
-    }
-
-    private string ResolveRecipient(string kind)
-    {
-        // [STUB] Real recipient lookup from auth/profile service is not yet implemented
-        // (PBL6-35 follow-up). All emails are delivered to the configured fallback address.
-        // Remove this stub once RecipientResolver integrates with the profile/auth API.
-        var fallback = _configuration["NOTIF_DEFAULT_RECIPIENT"]
-            ?? _configuration["SMTP_FROM"]
-            ?? "noreply@job-platform.local";
-        _logger.LogWarning(
-            "[STUB] Recipient for {RecipientKind} resolved to configured fallback {Recipient}. "
-            + "Real user lookup (PBL6-35) is not yet implemented — do not use in production without setting NOTIF_DEFAULT_RECIPIENT.",
-            kind, fallback);
-        return fallback;
+            recipientEmail, subject, html, text, template, ct);
     }
 
     private string ResolveSetting(string key, string fallback)
