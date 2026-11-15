@@ -7,6 +7,8 @@ public class NotifDbContext : DbContext
 {
     public DbSet<NotificationLog> NotificationLogs => Set<NotificationLog>();
 
+    public DbSet<TelegramSubscription> TelegramSubscriptions => Set<TelegramSubscription>();
+
     public NotifDbContext(DbContextOptions<NotifDbContext> options)
         : base(options)
     {
@@ -27,6 +29,15 @@ public class NotifDbContext : DbContext
             b.Property(e => e.TemplateName).HasMaxLength(64).IsRequired();
             b.Property(e => e.Status).HasMaxLength(16).IsRequired();
             b.Property(e => e.ErrorMessage).HasMaxLength(2000);
+        });
+
+        modelBuilder.Entity<TelegramSubscription>(b =>
+        {
+            b.ToTable("telegram_subscriptions");
+            b.HasKey(e => e.Id);
+            b.HasIndex(e => e.ChatId).IsUnique();
+            b.Property(e => e.ChatId).IsRequired();
+            b.Property(e => e.IsActive).IsRequired();
         });
     }
 }
