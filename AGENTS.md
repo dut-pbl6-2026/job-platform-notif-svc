@@ -137,3 +137,15 @@ Commits — `<type>(notif): <subject>` (scope always `notif` for this repo):
 | `ci` | `ci(notif): add Dockerfile and CI workflow` |
 
 PR checklist: Description / How to verify / Checklist `mise run build/test/format/ef-check`.
+
+## Internal email endpoint (app-svc)
+
+`POST /api/internal/email` — service-to-service only, not routed by the gateway. The caller presents
+`Authorization: Bearer <NOTIF_INTERNAL_TOKEN>` (constant-time compare, fail closed when unset). Body:
+`{to, subject, html, text?, icsFileName?, icsContent?}`; `icsContent` is the raw VCALENDAR text, attached
+as `text/calendar`. Used for recruiter-composed email and interview invites/reschedules/cancellations.
+`INotificationService` now has an attachment-aware overload; transports that cannot attach fall back to
+the plain body. Limits: HTML 200k chars, ICS 256 KB. Returns `202 {sent:true}` or `502`.
+
+Add `NOTIF_INTERNAL_TOKEN` to the notif environment and the same value to app-svc
+(`NOTIF_SERVICE_URL=http://notif:5006`).

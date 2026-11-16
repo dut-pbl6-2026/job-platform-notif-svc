@@ -163,6 +163,9 @@ app.MapGet("/", () => Results.Ok(new { service = "notification", version = "0.1.
 
 app.MapNotificationEndpoints();
 
+// app-svc: recruiter-composed email and interview invites, token-protected, never routed publicly.
+app.MapInternalEmailEndpoint();
+
 if (app.Environment.IsDevelopment()
     && SecretValue.Usable(app.Configuration[NotificationHistoryEndpoint.TokenSetting]) is null)
 {

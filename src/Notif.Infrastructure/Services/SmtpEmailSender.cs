@@ -19,7 +19,16 @@ public class SmtpEmailSender : INotificationService
         _logger = logger;
     }
 
-    public async Task SendAsync(string to, string subject, string htmlBody, string textBody, CancellationToken ct = default)
+    public Task SendAsync(string to, string subject, string htmlBody, string textBody, CancellationToken ct = default) =>
+        SendAsync(to, subject, htmlBody, textBody, attachment: null, ct);
+
+    public async Task SendAsync(
+        string to,
+        string subject,
+        string htmlBody,
+        string textBody,
+        EmailAttachment? attachment,
+        CancellationToken ct = default)
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(to);
         var host = _config["SMTP_HOST"] ?? "";
@@ -41,7 +50,17 @@ public class SmtpEmailSender : INotificationService
         message.From.Add(MailboxAddress.Parse(from));
         message.To.Add(MailboxAddress.Parse(to.Trim()));
         message.Subject = subject;
-        message.Body = new BodyBuilder { HtmlBody = htmlBody, TextBody = textBody }.ToMessageBody();
+
+        var builder = new BodyBuilder { HtmlBody = htmlBody, TextBody = textBody };
+        if (attachment is not null)
+        {
+            builder.Attachments.Add(
+                attachment.FileName,
+                attachment.Content,
+                ContentType.Parse(attachment.ContentType));
+        }
+
+        message.Body = builder.ToMessageBody();
 
         using var client = new SmtpClient();
         var secure = SecureSocketOptions.StartTls;
@@ -58,6 +77,10 @@ public class SmtpEmailSender : INotificationService
 
         await client.SendAsync(message, ct);
         await client.DisconnectAsync(true, ct);
-        _logger.LogInformation("Email sent to {Recipient} subject {Subject}.", to, subject);
+        _logger.LogInformation(
+            "Email sent to {Recipient} subject {Subject} attachment {Attachment}.",
+            to,
+            subject,
+            attachment?.FileName ?? "none");
     }
 }
