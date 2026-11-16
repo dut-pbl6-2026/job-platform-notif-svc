@@ -1,4 +1,5 @@
 using Microsoft.Extensions.Configuration;
+using Notif.Infrastructure.Configuration;
 
 namespace Notif.Infrastructure.Services;
 
@@ -39,15 +40,5 @@ public sealed record AuthServiceOptions(string BaseUrl, string InternalToken)
         return new AuthServiceOptions(baseUrl.TrimEnd('/'), token);
     }
 
-    private static string? Usable(string? value)
-    {
-        if (string.IsNullOrWhiteSpace(value)
-            || value.StartsWith("<set via", StringComparison.Ordinal)
-            || value.Contains("${", StringComparison.Ordinal))
-        {
-            return null;
-        }
-
-        return value.Trim();
-    }
+    private static string? Usable(string? value) => SecretValue.Usable(value);
 }

@@ -3,14 +3,18 @@ using Xunit;
 
 namespace Notif.Tests;
 
-/// <summary>Unit: NOTIF_HISTORY_TOKEN policy. Fail closed outside Development; open only as a Development opt-in.</summary>
+/// <summary>
+/// Unit: NOTIF_HISTORY_TOKEN policy. Fail closed outside Development; a template placeholder counts
+/// as missing, and the token is never accepted as an identity on its own.
+/// </summary>
 public class NotificationHistoryPolicyTests
 {
     [Theory]
     [InlineData(null)]
     [InlineData("")]
     [InlineData("   ")]
-    public void ValidateTokenPolicy_WhenTokenMissingOutsideDevelopment_Throws(string? token)
+    [InlineData("__SET_VIA_INFISICAL__")]
+    public void ValidateTokenPolicy_WhenTokenMissingOrPlaceholderOutsideDevelopment_Throws(string? token)
     {
         var ex = Assert.Throws<InvalidOperationException>(
             () => NotificationHistoryEndpoint.ValidateTokenPolicy(token, isDevelopment: false));
@@ -21,7 +25,8 @@ public class NotificationHistoryPolicyTests
     [Theory]
     [InlineData(null)]
     [InlineData("")]
-    public void ValidateTokenPolicy_WhenTokenMissingInDevelopment_DoesNotThrow(string? token)
+    [InlineData("__SET_VIA_INFISICAL__")]
+    public void ValidateTokenPolicy_WhenTokenMissingOrPlaceholderInDevelopment_DoesNotThrow(string? token)
         => NotificationHistoryEndpoint.ValidateTokenPolicy(token, isDevelopment: true);
 
     [Theory]
@@ -31,22 +36,22 @@ public class NotificationHistoryPolicyTests
         => NotificationHistoryEndpoint.ValidateTokenPolicy("internal-token-value", isDevelopment);
 
     [Fact]
-    public void IsAuthorized_WhenTokenConfigured_RequiresMatch_EvenIfDevelopmentOptIn()
+    public void HasValidToken_RequiresTheConfiguredValue()
     {
-        Assert.True(NotificationHistoryEndpoint.IsAuthorized("t0ken", "t0ken", allowWithoutToken: true));
-        Assert.True(NotificationHistoryEndpoint.IsAuthorized("t0ken", "t0ken", allowWithoutToken: false));
-        Assert.False(NotificationHistoryEndpoint.IsAuthorized(null, "t0ken", allowWithoutToken: true));
-        Assert.False(NotificationHistoryEndpoint.IsAuthorized("wrong", "t0ken", allowWithoutToken: true));
+        Assert.True(NotificationHistoryEndpoint.HasValidToken("t0ken", "t0ken"));
+        Assert.False(NotificationHistoryEndpoint.HasValidToken(null, "t0ken"));
+        Assert.False(NotificationHistoryEndpoint.HasValidToken("wrong", "t0ken"));
     }
 
     [Theory]
     [InlineData(null)]
     [InlineData("")]
     [InlineData("  ")]
-    public void IsAuthorized_WhenTokenNotConfigured_FollowsDevelopmentOptIn(string? expected)
+    [InlineData("__SET_VIA_INFISICAL__")]
+    public void HasValidToken_WhenExpectedIsUnsetOrPlaceholder_NeverMatches(string? expected)
     {
-        Assert.True(NotificationHistoryEndpoint.IsAuthorized(null, expected, allowWithoutToken: true));
-        Assert.False(NotificationHistoryEndpoint.IsAuthorized(null, expected, allowWithoutToken: false));
-        Assert.False(NotificationHistoryEndpoint.IsAuthorized("anything", expected, allowWithoutToken: false));
+        Assert.False(NotificationHistoryEndpoint.HasValidToken(null, expected));
+        Assert.False(NotificationHistoryEndpoint.HasValidToken("anything", expected));
+        Assert.False(NotificationHistoryEndpoint.HasValidToken(expected, expected));
     }
 }

@@ -1,5 +1,6 @@
 using Microsoft.AspNetCore.Routing;
 using Microsoft.EntityFrameworkCore;
+using Notif.Core.Interfaces;
 using Notif.Infrastructure.Data;
 using Notif.Infrastructure.Services;
 
@@ -8,24 +9,23 @@ namespace Notif.Api.Endpoints;
 /// <summary>Routes for the notification API. Kept outside Program.cs so integration tests can host them.</summary>
 public static class NotificationEndpoints
 {
-    public static IEndpointRouteBuilder MapNotificationEndpoints(
-        this IEndpointRouteBuilder app,
-        bool allowHistoryWithoutToken)
+    public static IEndpointRouteBuilder MapNotificationEndpoints(this IEndpointRouteBuilder app)
     {
         app.MapGet("/api/notifications/history", async (
             HttpContext ctx,
             IConfiguration configuration,
             NotifDbContext db,
+            IUserEmailLookup emailLookup,
             CancellationToken ct,
             int page = 1,
             int size = 20) =>
             await NotificationHistoryEndpoint.HandleAsync(
+                ctx.User,
                 ctx.Request.Headers[NotificationHistoryEndpoint.TokenHeader].FirstOrDefault(),
                 configuration[NotificationHistoryEndpoint.TokenSetting],
-                allowHistoryWithoutToken,
-                page, size, db, ct))
+                page, size, db, emailLookup, ct))
         .WithTags("Notifications")
-        .WithSummary("Paginated email delivery history (SRS NOTIF-01-06)");
+        .WithSummary("Paginated email delivery history, scoped to the authenticated caller (SRS NOTIF-01-06)");
 
         // PBL6-63 / TELE-01-05: Telegram webhook. Authenticated by the webhook secret header, not by JWT.
         app.MapPost("/api/notifications/telegram/webhook", async (

@@ -1,5 +1,6 @@
 using System.Text.RegularExpressions;
 using Microsoft.Extensions.Configuration;
+using Notif.Infrastructure.Configuration;
 
 namespace Notif.Infrastructure.Services;
 
@@ -50,15 +51,5 @@ public sealed record TelegramOptions(string BotToken, string WebhookSecret, stri
         return new TelegramOptions(token, secret, baseUrl.TrimEnd('/'));
     }
 
-    private static string? Usable(string? value)
-    {
-        if (string.IsNullOrWhiteSpace(value)
-            || value.StartsWith("<set via", StringComparison.Ordinal)
-            || value.Contains("${", StringComparison.Ordinal))
-        {
-            return null;
-        }
-
-        return value.Trim();
-    }
+    private static string? Usable(string? value) => SecretValue.Usable(value);
 }
