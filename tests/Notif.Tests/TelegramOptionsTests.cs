@@ -30,6 +30,14 @@ public class TelegramOptionsTests
     }
 
     [Fact]
+    public void Load_WithEnvTemplatePlaceholderToken_IsDisabled()
+    {
+        var options = TelegramOptions.Load(Config(("TELEGRAM_BOT_TOKEN", "__SET_VIA_INFISICAL__")));
+
+        Assert.False(options.IsEnabled);
+    }
+
+    [Fact]
     public void Load_WithTokenButNoSecret_Throws()
     {
         Assert.Throws<InvalidOperationException>(() => TelegramOptions.Load(Config(

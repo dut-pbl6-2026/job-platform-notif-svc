@@ -2,7 +2,9 @@ using Microsoft.EntityFrameworkCore;
 using Notif.Api.Bootstrap;
 using Notif.Api.Endpoints;
 using Notif.Api.Observability;
+using Notif.Api.Security;
 using Notif.Core.Interfaces;
+using Notif.Infrastructure.Configuration;
 using Notif.Infrastructure.Data;
 using Notif.Infrastructure.Services;
 using Notif.Infrastructure.Workers;
@@ -136,6 +138,10 @@ var app = builder.Build();
 app.UseServiceLogging();
 app.UseExceptionHandler();
 
+// PBL6-79: history is scoped to the caller. The gateway forwards the validated JWT subject/role
+// as X-User-Id/X-User-Role (and strips client-supplied copies); this service has no public ingress.
+app.UseMiddleware<GatewayIdentityMiddleware>();
+
 if (app.Environment.IsDevelopment())
 {
     app.UseSwagger();
@@ -155,12 +161,14 @@ if (app.Configuration.GetValue("METRICS_ENABLED", !app.Environment.IsProduction(
 app.MapGet("/", () => Results.Ok(new { service = "notification", version = "0.1.0" }))
     .ExcludeFromDescription();
 
-app.MapNotificationEndpoints(allowHistoryWithoutToken: app.Environment.IsDevelopment());
+app.MapNotificationEndpoints();
 
-if (app.Environment.IsDevelopment() && string.IsNullOrWhiteSpace(app.Configuration[NotificationHistoryEndpoint.TokenSetting]))
+if (app.Environment.IsDevelopment()
+    && SecretValue.Usable(app.Configuration[NotificationHistoryEndpoint.TokenSetting]) is null)
 {
     app.Logger.LogWarning(
-        "NOTIF_HISTORY_TOKEN is not set. Notification history is open because the environment is Development.");
+        "NOTIF_HISTORY_TOKEN is not set (or is only a template placeholder). History stays closed to machine callers; "
+        + "users still see only their own entries.");
 }
 
 if (builder.Environment.IsDevelopment()

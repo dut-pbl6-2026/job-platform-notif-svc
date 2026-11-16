@@ -20,6 +20,7 @@ public class AuthServiceOptionsTests
     [InlineData("http://auth-svc:5001", "  ")]
     [InlineData("<set via infisical>", "token")]
     [InlineData("http://auth-svc:5001", "${AUTH_INTERNAL_TOKEN_FOR_NOTIF}")]
+    [InlineData("http://auth-svc:5001", "__SET_VIA_INFISICAL__")]
     public void Load_OutsideDevelopment_WhenEitherValueMissing_Throws(string? url, string? token)
     {
         var config = Config(("AUTH_SERVICE_URL", url), ("AUTH_INTERNAL_TOKEN_FOR_NOTIF", token));
